@@ -25,9 +25,9 @@ for t in $ORDER; do
 CREATE TEMP TABLE attempts_in (LIKE attempts INCLUDING DEFAULTS);
 COPY attempts_in ($cols) FROM '/sample/attempts.csv' CSV HEADER;
 INSERT INTO attempts (attempt_id, user_id, participant_id, task_id, mode, status, assistant_model, forked_from_checkpoint_id,
-                      started_at, submitted_at, followups_done_at, auto_submitted, share_token_hash, shared_at)
+                      started_at, submitted_at, followups_done_at)
 SELECT attempt_id, user_id, participant_id, task_id, mode, status, assistant_model, NULL,
-       started_at, submitted_at, followups_done_at, auto_submitted, share_token_hash, shared_at FROM attempts_in;"
+       started_at, submitted_at, followups_done_at FROM attempts_in;"
   else
     SQL+="
 COPY $t ($cols) FROM '/sample/$t.csv' CSV HEADER;"
