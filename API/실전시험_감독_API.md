@@ -166,25 +166,48 @@ PC  ◀── paired {pairCode, phoneUrl} ──  서버   (PC 는 phoneUrl 을 
 
 ---
 
-## 3. 기업 콘솔 API (참고 구현에 있음, 콘솔 화면 연결은 다음 단계)
+## 3. 기업 콘솔 API (콘솔 화면이 `frontend/src/data/consoleApi.ts` 로 부른다)
+
+**인증·회사 분리.** 모든 콘솔 API 는 로그인한 사용자(`CurrentUser`)를 받는다. 지금은 목업 로그인이 헤더로 보낸다:
+`X-Pair-User-Id`, `X-Pair-Role`(MANAGER·PROCTOR·ADMIN), `X-Pair-Company-Id`(기업 회원만). 백엔드 `pair.auth.mode=header`(개발용).
+팀원 1 이 Spring Security 를 붙이면 `CurrentUserResolver` 구현만 바꾸고 API 는 그대로 둔다.
+
+| 상황 | 응답 |
+|---|---|
+| 로그인 정보 없음·형식 틀림 | 401 |
+| 역할이 안 됨 (감독관이 회차 관리·결과, 응시자가 콘솔) | 403 |
+| 다른 회사 회차 | 404 (있는지도 알리지 않음) |
+
+MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기 회사 회차 보기·이벤트·사진·판정. ADMIN: 모든 회사, 회차를 만들 때 `companyId` 를 넣는다. 기업 회원이 보낸 `companyId` 는 무시하고 로그인한 회사로 저장한다.
+
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/console/sessions?companyId=` | 회차 목록 + 인원 집계 (취소한 회차는 `phase=CANCELED`, `canceledAt`) |
+| GET | `/api/console/sessions` | 내 회사 회차 목록 + 인원 집계·미확인 이벤트 수(`unreviewedEvents`). 관리자는 `?companyId=` 로 좁히고 없으면 전체 (취소한 회차는 `phase=CANCELED`, `canceledAt`) |
 | POST | `/api/console/sessions` | 회차 생성 `{companyId, title, startsAt, endsAt, proctoring, taskIds[]}` |
 | GET·PUT | `/api/console/sessions/{id}` | 상세 · 수정(시작 전만, 시간·과제·이름이 바뀌면 대상자에게 변경 안내 메일) |
 | POST | `/api/console/sessions/{id}/cancel` | 취소(시작 전만). **지우지 않고** `canceled_at` 을 남기고 대상자에게 취소 안내 메일 |
 | POST | `/api/console/sessions/{id}/participants` | 대상자 추가 `{participants:[{name,email}]}` → `{added, rejected:[{line,name,email,reason}]}` |
 | POST | `/api/console/sessions/{id}/participants/csv?dryRun=` | 대상자 CSV(.csv, 2MB, 최대 1,000명) 업로드. 첫 행 `이름,이메일`. UTF-8(BOM 가능)·MS949 모두 읽음. `dryRun=true` 면 저장 없이 미리 보기(`added` = 등록될 인원). 저장하면 원본을 `participant-csv/{회차}/{업로드 ms}.csv` 에 보관(`participants_csv_key`). 틀린 행 하나 때문에 전체를 거절하지 않음 |
 | GET | `/api/console/sessions/participants-template.csv` | 대상자 CSV 양식 내려받기 |
+| DELETE | `/api/console/sessions/{id}/participants/{pid}` | 명단에서 빼기 (시작 전 회차, 입장 전 대상자만) |
 | POST | `/api/console/sessions/{id}/participants/{pid}/invite` | 초대 메일 다시 보내기 (**새 토큰 발급, 이전 링크 무효**) |
-| GET | `/api/console/sessions/{id}/participants/{pid}/events` | 감독 이벤트 목록 (판정 포함) |
-| PUT | `/api/console/sessions/{id}/events/{eid}/review` | 담당자 판정 `{review: "OK"\|"SUSPECT"\|null, note, reviewerId}`. `null` 이면 판정을 지움. `reviewerId` 는 인증이 붙으면 로그인 정보로 바꾼다 |
+| GET | `/api/console/sessions/{id}/events` | 회차 전체 감독 이벤트 (시간순, `participantId` 포함). 콘솔이 대상자마다 따로 부르지 않게 |
+| GET | `/api/console/sessions/{id}/participants/{pid}/events` | 대상자 한 명의 감독 이벤트 (판정 포함) |
+| PUT | `/api/console/sessions/{id}/events/{eid}/review` | 담당자 판정 `{review: "OK"\|"SUSPECT"\|null, note}`. `null` 이면 판정을 지움. 판정자(`reviewedBy`)는 로그인한 사람 |
 | GET | `/api/console/sessions/{id}/events/{eid}/snapshot` | 사진 (image/jpeg, no-store) |
 | GET | `/api/console/sessions/{id}/results` | 순위·분포·역량별 평균·상하위 비교·감독 합계·지표 |
 | GET | `/api/console/sessions/{id}/results.csv` | CSV (UTF-8 BOM, 수식 주입 방지) |
 
-**주의: 콘솔 API 는 아직 인증이 없다.** 기업 로그인을 붙일 때 `companyId` 를 로그인 정보에서 꺼내고, 회차의 회사와 같은지 확인해야 한다.
+### 3-1. 관리자 과제 콘솔
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/console/tasks` | 관리자: 모든 과제와 공개 상태. 매니저: 공개(OPEN) 과제만 (회차 만들 때 고르는 목록) |
+| GET | `/api/console/tasks/{taskId}` | 과제 정의 + 공개 상태 (관리자) |
+| POST | `/api/console/tasks/{taskId}/publish` · `/hide` | 공개(HIDDEN → OPEN) · 숨기기 (관리자). 처음 공개한 시각(`publishedAt`)은 남는다 |
+
+회차에는 **OPEN 과제만** 걸 수 있다 (만들기·수정 모두 400). 과제 정의는 아직 classpath 파일이라 공개 상태만 `task_publications` 표에 둔다 (행이 없으면 HIDDEN).
 
 ---
 
@@ -200,10 +223,11 @@ PC  ◀── paired {pairCode, phoneUrl} ──  서버   (PC 는 phoneUrl 을 
 | 하루 전 알림 | 5분 주기로 시작 24시간 안에 든 회차의 대상자에게 1번 (`reminded_at`). 초대 메일을 받은(SENT) 사람만, 시작 24시간 안에 초대된 사람은 건너뜀. 토큰 원문이 없으므로 링크 대신 "초대 메일의 링크" 안내 |
 | 변경·취소 안내 | 수정·취소 트랜잭션 커밋 뒤 대상자 전원에게 비동기 발송 |
 | 로그 | 초대 토큰이 경로에 들어가므로 접근 로그에서 가린다. 메일 주소도 로그에 남기지 않는다 |
+| 브라우저 이벤트 | 감독 회차의 응시 화면은 탭·창 이탈, 마우스 이탈, 전체 화면 해제, **외부 붙여넣기(PASTE)** 를 1-7 로 함께 보낸다 (`source=BROWSER`, 사진 없음). 붙여넣기는 시험 화면 안에서 복사한 글이면 세지 않고, 20자 미만도 무시하며, 글 내용 대신 글자 수·줄 수·위치만 보낸다 |
 
 ## 5. 테이블
 
-pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__exam_sessions.sql`, `V2__exam_decisions.sql` 참고:
-`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`, `participant_attempts`, `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`
+pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__exam_sessions.sql`, `V2__exam_decisions.sql`, `V3__task_publications.sql` 참고:
+`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`, `participant_attempts`, `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`, `task_publications`
 
 > `participant_attempts` 는 ERD 의 `attempts.participant_id` 를 대신한다. 응시(attempts)가 아직 파일(`pilot-data`)에 있어서, attempts 가 DB 로 옮겨질 때 없앤다.
