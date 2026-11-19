@@ -297,6 +297,11 @@ CREATE TABLE attempts (
     started_at                 TIMESTAMPTZ  NOT NULL DEFAULT now(),
     submitted_at               TIMESTAMPTZ,
     followups_done_at          TIMESTAMPTZ,
+    provider                   VARCHAR(20),
+    first_valid_at             TIMESTAMPTZ,
+    error                      TEXT,
+    followup_questions         JSONB,
+    followup_answers           JSONB,
     FOREIGN KEY (task_id, mode) REFERENCES tasks (task_id, usage),
     CHECK ((mode = 'SELF') = (user_id IS NOT NULL)),
     CHECK ((mode = 'LIVE') = (participant_id IS NOT NULL)),
@@ -321,6 +326,11 @@ COMMENT ON COLUMN attempts.forked_from_checkpoint_id IS '롤백 출발 체크포
 COMMENT ON COLUMN attempts.started_at IS '시작 시각';
 COMMENT ON COLUMN attempts.submitted_at IS '제출 시각';
 COMMENT ON COLUMN attempts.followups_done_at IS '후속 질문 완료 시각';
+COMMENT ON COLUMN attempts.provider IS '어시스턴트 제공사(openai/anthropic 등)';
+COMMENT ON COLUMN attempts.first_valid_at IS '첫 유효 결과 시각(개발: 고친 코드로 테스트 전부 통과, 비개발: 필수 항목을 채운 첫 저장)';
+COMMENT ON COLUMN attempts.error IS '채점 실패 사유(status = ERROR 일 때)';
+COMMENT ON COLUMN attempts.followup_questions IS '응시자가 본 후속 질문 문구 목록(과제 질문이 나중에 바뀌어도 채점은 이 문구로)';
+COMMENT ON COLUMN attempts.followup_answers IS '후속 질문 답 목록(질문과 같은 순서)';
 
 CREATE TABLE attempt_files (
     attempt_file_id  BIGSERIAL    PRIMARY KEY,
@@ -347,6 +357,9 @@ CREATE TABLE chat_turns (
     input_tokens   INT,
     output_tokens  INT,
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    provider       VARCHAR(20),
+    request        JSONB,
+    latency_ms     INT,
     UNIQUE (attempt_id, turn_no),
     -- checkpoints 가 (응시, 턴 번호, 역할) 복합 외래 키로 질문 턴만 가리킨다
     UNIQUE (attempt_id, turn_no, role)
@@ -361,6 +374,9 @@ COMMENT ON COLUMN chat_turns.model IS '모델';
 COMMENT ON COLUMN chat_turns.input_tokens IS '입력 토큰';
 COMMENT ON COLUMN chat_turns.output_tokens IS '출력 토큰';
 COMMENT ON COLUMN chat_turns.created_at IS '생성 시각';
+COMMENT ON COLUMN chat_turns.provider IS '어시스턴트 제공사(AI 턴만)';
+COMMENT ON COLUMN chat_turns.request IS 'AI 에 보낸 요청 원문(모델, 최대 출력, 추론 강도, 시스템 프롬프트, 메시지. AI 턴만)';
+COMMENT ON COLUMN chat_turns.latency_ms IS 'AI 응답 시간(ms, AI 턴만)';
 
 CREATE TABLE attempt_events (
     event_id    BIGSERIAL    PRIMARY KEY,
@@ -374,8 +390,19 @@ COMMENT ON TABLE  attempt_events IS '작업 기록';
 COMMENT ON COLUMN attempt_events.event_id IS '이벤트 ID';
 COMMENT ON COLUMN attempt_events.attempt_id IS '응시 ID';
 COMMENT ON COLUMN attempt_events.type IS '종류(START 시작/SAVE 저장/BUILD 빌드/RUN 실행/CHAT 질문/CHAT_EMPTY AI 빈 답(채점 제외)/AI_EDIT 수정 제안 적용·거절/SUBMIT 제출/FOLLOWUPS 후속 답변/FIRST_VALID 첫 유효 결과)';
-COMMENT ON COLUMN attempt_events.payload IS '상세 내용';
+COMMENT ON COLUMN attempt_events.payload IS '상세 내용(SAVE 는 저장한 파일 내용 content 도 함께 남긴다)';
 COMMENT ON COLUMN attempt_events.created_at IS '발생 시각';
+
+-- 채점 버전·체크 목록이 아직 파일(grader/versions)이라, scorings 이하 테이블을 채우기 전까지 리포트 JSON 을 통째로 둔다
+CREATE TABLE attempt_reports (
+    attempt_id  BIGINT       PRIMARY KEY REFERENCES attempts (attempt_id),
+    report      JSONB        NOT NULL,
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE  attempt_reports IS '채점 리포트(응시당 최신 1건)';
+COMMENT ON COLUMN attempt_reports.attempt_id IS '응시 ID';
+COMMENT ON COLUMN attempt_reports.report IS '리포트 JSON(총점, 항목별 점수, 체크 결과, 토큰)';
+COMMENT ON COLUMN attempt_reports.updated_at IS '저장 시각';
 
 -- 답변은 답하는 방식에 따라 두 테이블로 나눈다. 어느 쪽에 들어갈지는 문항 유형이 정하고,
 -- (문항 ID, 유형) 복합 외래 키로 문항의 실제 유형과 어긋난 답이 들어오지 못하게 한다.
