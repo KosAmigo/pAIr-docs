@@ -1,16 +1,26 @@
 # pAIr-docs
-pAIr(AI 활용 역량 진단 플랫폼) 기획·설계 산출물 모음. 코드는 [pAIr-front](https://github.com/KosAmigo/pAIr-front), [pAIr-back](https://github.com/KosAmigo/pAIr-back).
+pAIr(AI 활용 역량 진단 플랫폼) 기획·설계·평가·API 문서. 코드는 [pAIr-front](https://github.com/KosAmigo/pAIr-front), [pAIr-back](https://github.com/KosAmigo/pAIr-back).
+
+> 2026-11-19 부터 문서의 원본은 이 저장소다. pAIr-front·pAIr-back 의 `docs/` 는 여기로 옮기고 지웠다.
 
 ## 목록
 | 폴더 | 파일 | 내용 |
 |---|---|---|
 | `기획/` | 프로젝트 수행계획서(pAir)-중간 수정.docx | 팀·기간·작업명세·기반구축·일정 |
-| `기획/` | 기획_결정사항.md | 애매했던 기획 요소의 확정안 (구현·ERD 기준). 원본은 pAIr-back `docs/기획_결정사항.md` |
-| `설계/` | ERD(영문).png, ERD(한글).png | 데이터 모델 (테이블 39개). 원본 SQL은 pAIr-back `docs/erd/pair_schema.sql` |
-| `설계/` | system-architecture.png | 시스템 아키텍처 (모듈·데이터·외부 연동) |
-| `설계/` | 시스템구성도.png | 시스템 구성도 (기술 스택·주요 흐름) |
+| | 기획_결정사항.md | 애매했던 기획 요소의 확정안 (구현·ERD 기준) |
+| | 역할_분담.md | 팀원별 흐름·기능·테이블, 흐름 사이 연결 지점 |
+| | 기술검증_보고서.md | 샌드박스·RAG·과제 생성 등 기술검증 결과 (코드는 pAIr-back `poc/`) |
+| `설계/` | ERD(영문).png, ERD(한글).png | 데이터 모델 그림 (테이블 39개) |
+| | erd/pair_schema.sql, erd/테이블_정의서.md | ERD 원본 DDL(PostgreSQL)과 테이블 설명 |
+| | erd/sample/ | 샘플 데이터 생성·적재·검증 스크립트와 CSV |
+| | system-architecture.png / .html | 시스템 아키텍처 (모듈·데이터·외부 연동) |
+| | 시스템구성도.png | 시스템 구성도 (기술 스택·주요 흐름) |
+| | 시스템구성도_소스/ | 구성도 HTML 원본과 로고 (pAIr-front 에 있던 이전 판, png 도 이전 판) |
+| `평가/` | 채점_기준표.md 외 | 6개 역량 감점 기준, 평가 기준 초안, 파일럿 테스트 계획·채점 시트 |
+| `API/` | 실전시험_감독_API.md | 실전 시험·감독 API 명세 (프론트 ↔ 백엔드, WebSocket 릴레이) |
 | - | [검증_결과.md](검증_결과.md) | 산출물과 실제 코드의 대조 결과, 아직 구현되지 않은 것 |
 
 ## 관리 규칙
+- 차후 변경시에는 이 파일들을 갱신하는 것으로 한다. 문서는 여기서만 고치고, 코드 주석이 문서를 가리킬 때는 `pAIr-docs/평가/채점_기준표.md` 처럼 이 저장소 경로로 쓴다.
 - 산출물은 "목표 설계"다. 지금 코드가 어디까지 왔는지는 [검증_결과.md](검증_결과.md)를 본다.
-- 차후 변경시에는 이 파일들을 갱신하는 것으로 한다
+- 샘플 스크립트(`설계/erd/sample/`)는 이 저장소 최상위에서 실행한다. 예: `python 설계/erd/sample/make_sample.py`
