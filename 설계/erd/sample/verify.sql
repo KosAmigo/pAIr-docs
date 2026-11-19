@@ -25,6 +25,9 @@ UNION ALL SELECT '롤백 응시와 체크포인트 주인이 다른 회원', COU
   WHERE o.user_id <> a.user_id
 UNION ALL SELECT '체크포인트 턴이 원래 응시에 없음', COUNT(*) FROM checkpoints c
   WHERE NOT EXISTS (SELECT 1 FROM chat_turns t WHERE t.attempt_id = c.attempt_id AND t.turn_no = c.turn_no)
+UNION ALL SELECT '롤백 응시가 원래 응시와 다른 과제', COUNT(*) FROM attempts a
+  JOIN checkpoints c ON c.checkpoint_id = a.forked_from_checkpoint_id JOIN attempts o ON o.attempt_id = c.attempt_id
+  WHERE o.task_id <> a.task_id
 UNION ALL SELECT '답변 문항이 응시 과제와 다름', COUNT(*) FROM (
     SELECT attempt_id, question_id FROM text_answers UNION ALL SELECT attempt_id, question_id FROM choice_answers) x
   JOIN attempts a ON a.attempt_id = x.attempt_id JOIN task_questions q ON q.question_id = x.question_id
@@ -157,6 +160,10 @@ DECLARE a bigint := (SELECT max(attempt_id) FROM attempts);
   ['같은 응시 두 번 환불', $q$WITH r AS (INSERT INTO credit_ledger(user_id,amount,balance_after,reason,attempt_id,note) SELECT user_id,10,999,'REFUND',attempt_id,'채점 실패' FROM credit_ledger WHERE reason = 'ATTEMPT_START' LIMIT 1 RETURNING user_id, attempt_id) INSERT INTO credit_ledger(user_id,amount,balance_after,reason,attempt_id,note) SELECT user_id,10,1009,'REFUND',attempt_id,'채점 실패' FROM r$q$],
   ['음수 환불', $q$INSERT INTO credit_ledger(user_id,amount,balance_after,reason) VALUES (2,-10,0,'REFUND')$q$],
   ['메모 없는 관리자 조정', $q$INSERT INTO credit_ledger(user_id,amount,balance_after,reason) VALUES (2,50,50,'ADJUST')$q$],
+  ['AI 답 턴에 체크포인트', $q$INSERT INTO checkpoints(attempt_id,turn_no) SELECT attempt_id,turn_no FROM chat_turns WHERE role = 'AI' AND (attempt_id, turn_no) NOT IN (SELECT attempt_id, turn_no FROM checkpoints) LIMIT 1$q$],
+  ['같은 질문에 체크포인트 두 번', $q$INSERT INTO checkpoints(attempt_id,turn_no) SELECT attempt_id,turn_no FROM checkpoints LIMIT 1$q$],
+  ['없는 턴에 체크포인트', $q$INSERT INTO checkpoints(attempt_id,turn_no) SELECT min(attempt_id),999 FROM attempts$q$],
+  ['실전 응시를 롤백으로', $q$UPDATE attempts SET forked_from_checkpoint_id = (SELECT min(checkpoint_id) FROM checkpoints) WHERE attempt_id = (SELECT min(attempt_id) FROM attempts WHERE mode = 'LIVE')$q$],
   ['회원이 연결된 실전 응시', $q$INSERT INTO attempts(user_id,participant_id,task_id,mode,status,assistant_model) SELECT 2,3,(SELECT task_id FROM tasks WHERE usage = 'LIVE' LIMIT 1),'LIVE','SOLVING','x'$q$],
   ['회원 없는 자가진단 응시', $q$INSERT INTO attempts(task_id,mode,status,assistant_model) SELECT task_id,'SELF','SOLVING','x' FROM attempts LIMIT 1$q$],
   ['없는 감독 판단', $q$UPDATE proctor_events SET review='MAYBE', reviewed_by=4, reviewed_at=now() WHERE proctor_event_id=(SELECT min(proctor_event_id) FROM proctor_events)$q$],
@@ -215,6 +222,15 @@ SELECT rc.code, COUNT(*) AS 엇갈림 FROM check_results cr JOIN rubric_checks r
   WHERE cr.status = 'SPLIT' GROUP BY rc.code ORDER BY 2 DESC, 1 LIMIT 5;
 \echo '-- 회원별 롤백 횟수'
 SELECT a.user_id, COUNT(*) AS 롤백 FROM attempts a WHERE a.forked_from_checkpoint_id IS NOT NULL GROUP BY 1 ORDER BY 1;
+\echo '-- 복기 트리: 원래 응시와 거기서 갈라진 응시 (어느 질문 시점에서 갈라졌는지)'
+SELECT o.attempt_id AS 원래_응시, c.turn_no AS 갈라진_질문_턴, c.label AS 이름, a.attempt_id AS 갈라진_응시, a.status AS 상태
+  FROM attempts a JOIN checkpoints c ON c.checkpoint_id = a.forked_from_checkpoint_id JOIN attempts o ON o.attempt_id = c.attempt_id
+ ORDER BY o.attempt_id, c.turn_no;
+\echo '-- 체크포인트 복원: 질문 시점의 파일 (파일마다 그 시점 이전 가장 최근 체크포인트 내용, 없으면 과제 원본)'
+SELECT DISTINCT ON (f.path) c.attempt_id, c.turn_no AS 저장된_턴, f.path, length(f.content) AS 글자
+  FROM checkpoint_files f JOIN checkpoints c USING (checkpoint_id)
+ WHERE c.attempt_id = (SELECT min(attempt_id) FROM checkpoints) AND c.turn_no <= 9
+ ORDER BY f.path, c.turn_no DESC;
 \echo '-- jsonb: 실행(RUN) 이벤트 중 실패 포함'
 SELECT COUNT(*) AS 실행_이벤트, COUNT(*) FILTER (WHERE payload::text ILIKE '%fail%') AS 실패_포함 FROM attempt_events WHERE type = 'RUN';
 \echo '-- 실전 회차별 입장 현황과 감독 이벤트'
