@@ -297,19 +297,12 @@ CREATE TABLE attempts (
     started_at                 TIMESTAMPTZ  NOT NULL DEFAULT now(),
     submitted_at               TIMESTAMPTZ,
     followups_done_at          TIMESTAMPTZ,
-    auto_submitted             BOOLEAN      NOT NULL DEFAULT FALSE,
-    share_token_hash           CHAR(64)     UNIQUE,
-    shared_at                  TIMESTAMPTZ,
     FOREIGN KEY (task_id, mode) REFERENCES tasks (task_id, usage),
     CHECK ((mode = 'SELF') = (user_id IS NOT NULL)),
-    CHECK (share_token_hash IS NULL OR mode = 'SELF'),
-    CHECK ((share_token_hash IS NULL) = (shared_at IS NULL)),
     CHECK ((mode = 'LIVE') = (participant_id IS NOT NULL)),
-    -- 풀이 중이 아니면 제출 시각이 있고, 채점 단계면 후속 질문을 마쳤거나 자동 제출된 것
+    -- 풀이 중이 아니면 제출 시각이 있고, 채점 단계면 후속 질문을 마친 것
     CHECK (status = 'SOLVING' OR submitted_at IS NOT NULL),
-    CHECK (status IN ('SOLVING', 'FOLLOWUP') OR followups_done_at IS NOT NULL OR auto_submitted),
-    -- 자동 제출은 실전 회차 종료 때만
-    CHECK (NOT auto_submitted OR mode = 'LIVE'),
+    CHECK (status IN ('SOLVING', 'FOLLOWUP') OR followups_done_at IS NOT NULL),
     -- 롤백(복기 트리)은 자가진단만. 실전 응시는 복기를 막는다
     CHECK (forked_from_checkpoint_id IS NULL OR mode = 'SELF'),
     UNIQUE (participant_id, task_id),
@@ -328,9 +321,6 @@ COMMENT ON COLUMN attempts.forked_from_checkpoint_id IS '롤백 출발 체크포
 COMMENT ON COLUMN attempts.started_at IS '시작 시각';
 COMMENT ON COLUMN attempts.submitted_at IS '제출 시각';
 COMMENT ON COLUMN attempts.followups_done_at IS '후속 질문 완료 시각';
-COMMENT ON COLUMN attempts.auto_submitted IS '실전 회차 종료 시각에 자동 제출됐는지(후속 질문 없이 바로 채점)';
-COMMENT ON COLUMN attempts.share_token_hash IS '리포트 공유 링크 토큰 해시(자가진단만, 끄면 비움)';
-COMMENT ON COLUMN attempts.shared_at IS '공유 시작 시각';
 
 CREATE TABLE attempt_files (
     attempt_file_id  BIGSERIAL    PRIMARY KEY,
@@ -698,6 +688,7 @@ CREATE TABLE exam_sessions (
     created_by    BIGINT       NOT NULL REFERENCES users (user_id),
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
     canceled_at   TIMESTAMPTZ,
+    closed_at     TIMESTAMPTZ,
     CHECK (ends_at > starts_at),
     CHECK (canceled_at IS NULL OR canceled_at < starts_at)
 );
@@ -712,6 +703,7 @@ COMMENT ON COLUMN exam_sessions.participants_csv_key IS '업로드한 대상자 
 COMMENT ON COLUMN exam_sessions.created_by IS '만든 회원 ID(같은 회사 MANAGER 또는 관리자)';
 COMMENT ON COLUMN exam_sessions.created_at IS '생성 시각';
 COMMENT ON COLUMN exam_sessions.canceled_at IS '취소 시각(시작 전에만 취소 가능)';
+COMMENT ON COLUMN exam_sessions.closed_at IS '종료 뒤 자동 제출 처리를 마친 시각(비어 있으면 아직 닫히지 않은 회차)';
 
 CREATE TABLE exam_session_tasks (
     session_id  BIGINT    NOT NULL REFERENCES exam_sessions (session_id),
@@ -734,6 +726,8 @@ CREATE TABLE exam_participants (
     email           VARCHAR(255) NOT NULL,
     name            VARCHAR(50)  NOT NULL,
     invite_token_hash  CHAR(64)  NOT NULL UNIQUE,
+    invite_status   VARCHAR(10)  NOT NULL DEFAULT 'PENDING' CHECK (invite_status IN ('PENDING', 'SENT', 'FAILED')),
+    invite_error    VARCHAR(255),
     invited_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     reminded_at     TIMESTAMPTZ,
     entered_at      TIMESTAMPTZ,
@@ -745,6 +739,8 @@ COMMENT ON COLUMN exam_participants.session_id IS '회차 ID';
 COMMENT ON COLUMN exam_participants.email IS '초대 이메일';
 COMMENT ON COLUMN exam_participants.name IS '이름';
 COMMENT ON COLUMN exam_participants.invite_token_hash IS '입장 링크 토큰 해시(SHA-256, 원문은 메일에만)';
+COMMENT ON COLUMN exam_participants.invite_status IS '초대 메일 발송 결과(PENDING 보내는 중/SENT 보냄/FAILED 실패). 다시 보내면 PENDING';
+COMMENT ON COLUMN exam_participants.invite_error IS '초대 메일 실패 사유';
 COMMENT ON COLUMN exam_participants.invited_at IS '초대 메일 발송 시각(다시 보내면 갱신)';
 COMMENT ON COLUMN exam_participants.reminded_at IS '시작 하루 전 알림 메일 발송 시각';
 COMMENT ON COLUMN exam_participants.entered_at IS '입장 시각';
@@ -811,7 +807,9 @@ CREATE TABLE proctor_events (
     confidence           NUMERIC(4, 3) CHECK (confidence BETWEEN 0 AND 1),
     detail               JSONB,
     snapshot_key         VARCHAR(255),
+    snapshot_bytes       INT           NOT NULL DEFAULT 0 CHECK (snapshot_bytes >= 0),
     snapshot_deleted_at  TIMESTAMPTZ,
+    received_at          TIMESTAMPTZ   NOT NULL DEFAULT now(),
     review               VARCHAR(10)   CHECK (review IN ('OK', 'SUSPECT')),
     review_note          TEXT,
     reviewed_by          BIGINT        REFERENCES users (user_id),
@@ -830,7 +828,9 @@ COMMENT ON COLUMN proctor_events.duration_ms IS '지속 시간(ms)';
 COMMENT ON COLUMN proctor_events.confidence IS '확신도(0~1, 카메라 감지만)';
 COMMENT ON COLUMN proctor_events.detail IS '상세 내용(붙여넣은 글자 수, 얼굴 수, 고개 각도 등)';
 COMMENT ON COLUMN proctor_events.snapshot_key IS '스냅샷 저장 위치';
+COMMENT ON COLUMN proctor_events.snapshot_bytes IS '감독 사진 크기(바이트, 사진이 없으면 0)';
 COMMENT ON COLUMN proctor_events.snapshot_deleted_at IS '스냅샷 삭제 시각(보관 기간 만료)';
+COMMENT ON COLUMN proctor_events.received_at IS '서버가 이벤트를 받은 시각(started_at 은 응시자 PC 기준 감지 시각)';
 COMMENT ON COLUMN proctor_events.review IS '담당자 판단(OK 문제 없음/SUSPECT 부정 의심, 없으면 미확인)';
 COMMENT ON COLUMN proctor_events.review_note IS '판단 메모';
 COMMENT ON COLUMN proctor_events.reviewed_by IS '판단한 회원 ID(같은 회사 PROCTOR·MANAGER 또는 관리자)';
@@ -840,6 +840,7 @@ COMMENT ON COLUMN proctor_events.reviewed_at IS '판단 시각';
 -- PostgreSQL 은 외래 키에 인덱스를 자동으로 만들지 않는다. 자주 따라가는 외래 키에만 건다.
 -- (UNIQUE 나 복합 PK 의 첫 컬럼인 외래 키는 그 인덱스를 함께 쓰므로 따로 만들지 않는다)
 CREATE INDEX idx_attempts_user_id          ON attempts (user_id);           -- 내 응시 목록
+CREATE INDEX idx_exam_sessions_open_ends_at ON exam_sessions (ends_at) WHERE closed_at IS NULL AND canceled_at IS NULL;  -- 자동 제출할 회차
 CREATE INDEX idx_attempt_events_attempt_id ON attempt_events (attempt_id);  -- 응시 작업 기록
 CREATE INDEX idx_checkpoints_attempt_id    ON checkpoints (attempt_id);     -- 응시의 체크포인트(복기 트리)
 CREATE INDEX idx_chat_attachments_turn_id  ON chat_attachments (turn_id);   -- 대화의 첨부

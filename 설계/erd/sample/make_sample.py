@@ -239,11 +239,10 @@ for n, s in enumerate(idx, 1):
     a = rj(os.path.join(SAMPLES, s["id"], "attempt.json"))
     attempt_id[s["id"]] = n
     att_code[s["id"]] = a["taskId"]
-    shared = [sha("share_sample_1"), "2026-11-13T00:00:00Z"] if n == 1 else [None, None]  # 1번 응시는 리포트 공유 링크를 켰다
     put("attempts", ["attempt_id", "user_id", "participant_id", "task_id", "mode", "status", "assistant_model", "forked_from_checkpoint_id",
-                     "started_at", "submitted_at", "followups_done_at", "share_token_hash", "shared_at"],
+                     "started_at", "submitted_at", "followups_done_at"],
         [n, owner(n), None, task_id[a["taskId"]], "SELF", "DONE", a["model"], None,
-         a["startedAt"], a["submittedAt"], a["followupsDoneAt"], *shared])
+         a["startedAt"], a["submittedAt"], a["followupsDoneAt"]])
     ws = os.path.join(SAMPLES, s["id"], "workspace")
     for p in sorted(glob.glob(os.path.join(ws, "**", "*"), recursive=True)):
         if os.path.isdir(p) or "자료" in p:
