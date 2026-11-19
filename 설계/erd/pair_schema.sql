@@ -310,6 +310,8 @@ CREATE TABLE attempts (
     CHECK (status IN ('SOLVING', 'FOLLOWUP') OR followups_done_at IS NOT NULL OR auto_submitted),
     -- 자동 제출은 실전 회차 종료 때만
     CHECK (NOT auto_submitted OR mode = 'LIVE'),
+    -- 롤백(복기 트리)은 자가진단만. 실전 응시는 복기를 막는다
+    CHECK (forked_from_checkpoint_id IS NULL OR mode = 'SELF'),
     UNIQUE (participant_id, task_id),
     -- proctor_events 가 (응시, 대상자) 복합 외래 키로 가리킨다
     UNIQUE (attempt_id, participant_id)
@@ -322,7 +324,7 @@ COMMENT ON COLUMN attempts.task_id IS '과제 ID';
 COMMENT ON COLUMN attempts.mode IS '모드(SELF 자가진단/LIVE 실전, 과제 용도와 같아야 함)';
 COMMENT ON COLUMN attempts.status IS '상태(SOLVING 풀이 중 → FOLLOWUP 후속 질문 중 → SCORING 채점 중 → DONE 완료, 채점 실패 시 ERROR. ERROR는 다시 채점하면 SCORING)';
 COMMENT ON COLUMN attempts.assistant_model IS '어시스턴트 모델';
-COMMENT ON COLUMN attempts.forked_from_checkpoint_id IS '롤백 출발 체크포인트 ID';
+COMMENT ON COLUMN attempts.forked_from_checkpoint_id IS '롤백 출발 체크포인트 ID(복기 트리의 부모. 원래 응시는 그대로 두고 갈라진 새 응시가 여기를 가리킨다. 자가진단만). 질문 k 시점에서 갈라지면 원래 응시의 1 ~ k-1 턴을 새 응시의 chat_turns로 같은 턴 번호로 복사한다(크레딧은 다시 차감하지 않음). 그래서 채점·리포트는 응시 하나의 대화만 읽으면 된다';
 COMMENT ON COLUMN attempts.started_at IS '시작 시각';
 COMMENT ON COLUMN attempts.submitted_at IS '제출 시각';
 COMMENT ON COLUMN attempts.followups_done_at IS '후속 질문 완료 시각';
@@ -355,7 +357,9 @@ CREATE TABLE chat_turns (
     input_tokens   INT,
     output_tokens  INT,
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    UNIQUE (attempt_id, turn_no)
+    UNIQUE (attempt_id, turn_no),
+    -- checkpoints 가 (응시, 턴 번호, 역할) 복합 외래 키로 질문 턴만 가리킨다
+    UNIQUE (attempt_id, turn_no, role)
 );
 COMMENT ON TABLE  chat_turns IS 'AI 대화';
 COMMENT ON COLUMN chat_turns.turn_id IS '대화 ID';
@@ -481,18 +485,25 @@ COMMENT ON COLUMN chat_attachments.pages IS '첨부 페이지 범위';
 COMMENT ON COLUMN chat_attachments.mime_type IS '파일 형식';
 COMMENT ON COLUMN chat_attachments.sent_text IS 'AI에 보낸 내용';
 
+-- 체크포인트는 응시자가 질문을 보낼 때마다 자동으로 만든다(질문 턴 1개당 1개). 그 질문을 보낸 순간의 파일 상태라서,
+-- 복기 트리에서 아무 질문 시점이나 골라 "그 질문을 다르게 해 보기"로 갈라질 수 있다. 질문 턴과 같은 트랜잭션에 저장한다.
 CREATE TABLE checkpoints (
     checkpoint_id  BIGSERIAL    PRIMARY KEY,
     attempt_id     BIGINT       NOT NULL REFERENCES attempts (attempt_id),
     turn_no        INT          NOT NULL,
+    turn_role      VARCHAR(10)  NOT NULL DEFAULT 'USER' CHECK (turn_role = 'USER'),
     label          VARCHAR(100),
-    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    UNIQUE (attempt_id, turn_no),
+    -- 같은 응시의 실제 질문 턴만 가리킨다(AI 답 턴이나 다른 응시의 턴은 안 됨)
+    FOREIGN KEY (attempt_id, turn_no, turn_role) REFERENCES chat_turns (attempt_id, turn_no, role)
 );
-COMMENT ON TABLE  checkpoints IS '체크포인트';
+COMMENT ON TABLE  checkpoints IS '체크포인트(질문마다 자동 생성)';
 COMMENT ON COLUMN checkpoints.checkpoint_id IS '체크포인트 ID';
 COMMENT ON COLUMN checkpoints.attempt_id IS '응시 ID';
-COMMENT ON COLUMN checkpoints.turn_no IS '대화 시점(턴 번호)';
-COMMENT ON COLUMN checkpoints.label IS '이름';
+COMMENT ON COLUMN checkpoints.turn_no IS '질문 턴 번호(이 질문을 보낸 순간의 파일 상태)';
+COMMENT ON COLUMN checkpoints.turn_role IS '가리키는 턴의 역할(항상 USER, 복합 외래 키용)';
+COMMENT ON COLUMN checkpoints.label IS '이름(선택. 응시자가 복기 트리에서 붙인다)';
 COMMENT ON COLUMN checkpoints.created_at IS '생성 시각';
 
 ALTER TABLE attempts
@@ -506,11 +517,15 @@ CREATE TABLE checkpoint_files (
     content             TEXT         NOT NULL,
     UNIQUE (checkpoint_id, path)
 );
-COMMENT ON TABLE  checkpoint_files IS '체크포인트 파일';
+-- 바뀐 파일만 저장한다: 같은 응시의 바로 앞 체크포인트(첫 체크포인트는 과제 원본)와 내용이 다른 파일만 한 행.
+-- 질문 k 시점으로 복원 = 과제 원본 위에, 파일마다 turn_no <= k 인 체크포인트 중 가장 최근 내용을 덮는다:
+--   SELECT DISTINCT ON (f.path) f.path, f.content FROM checkpoint_files f JOIN checkpoints c USING (checkpoint_id)
+--    WHERE c.attempt_id = :attempt AND c.turn_no <= :k ORDER BY f.path, c.turn_no DESC;
+COMMENT ON TABLE  checkpoint_files IS '체크포인트 파일(앞 체크포인트에서 바뀐 파일만)';
 COMMENT ON COLUMN checkpoint_files.checkpoint_file_id IS '체크포인트 파일 ID';
 COMMENT ON COLUMN checkpoint_files.checkpoint_id IS '체크포인트 ID';
 COMMENT ON COLUMN checkpoint_files.path IS '파일 경로';
-COMMENT ON COLUMN checkpoint_files.content IS '내용';
+COMMENT ON COLUMN checkpoint_files.content IS '그 시점의 파일 내용';
 
 -- ───────── 4. 채점 기준 ─────────
 
