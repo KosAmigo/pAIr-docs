@@ -11,14 +11,15 @@
 | 시각 | 모두 ISO-8601 UTC 문자열 (`2026-12-01T06:00:00Z`). **판단은 서버 시각으로만** 한다 |
 | 오류 | HTTP 상태 + `{"message": "사용자에게 그대로 보여 줄 한국어 문장"}` |
 | 상태 코드 | 400 입력·상태 오류, 404 없는 토큰·회차, 413 파일 너무 큼 |
-| 응시자 인증 | 로그인 없음. 메일 링크의 **초대 토큰(invite)** 이 곧 본인 확인. 43자 `[A-Za-z0-9_-]`, `SecureRandom` 32바이트 |
+| 응시자 인증 | 로그인 없음. 메일 링크의 **초대 토큰(invite)** 이 곧 본인 확인. 43자 `[A-Za-z0-9_-]`, `SecureRandom` 32바이트. **DB 에는 SHA-256 해시(`invite_token_hash`)만** 저장하고, 원문은 초대 메일에만 담는다. 다시 보내면 새 토큰이 나오고 이전 링크는 막힌다 |
 | 입장 링크 | `{프론트 주소}/entry?invite={초대 토큰}` |
 
 **개인정보 원칙 (동의서 문구와 맞춰야 함)**
 - 영상은 서버로 보내지 않는다. 카메라 분석은 응시자 브라우저 안에서만 한다.
 - 이상이 확정된 순간에만 이벤트 1건과 JPEG 사진 1장(320px, 보통 10~20KB)을 보낸다.
 - 얼굴을 식별하지 않는다(누구인지가 아니라 얼굴이 있는지만 본다).
-- 사진은 보관 기간(기본 168시간)이 지나면 지우고 `snapshot_deleted_at` 만 남긴다.
+- 사진은 **회차 종료 30일 뒤** 지우고 `snapshot_deleted_at` 만 남긴다.
+- 감독 이벤트는 자동 탈락이 아니라 담당자가 확인(OK/SUSPECT)하는 기록이다.
 
 ---
 
@@ -46,19 +47,21 @@
   "startedAt": null,
   "submittedAt": null,
   "taskIds": ["order-deadlock"],
-  "attempts": {}
+  "attempts": {},
+  "tasks": [{ "taskId": "order-deadlock", "attemptId": null, "submitted": false }]
 }
 ```
-- `phase`: `UPCOMING`(시작 전) · `LIVE`(진행 중) · `ENDED`(종료) — 서버 시각 기준
+- `phase`: `UPCOMING`(시작 전) · `LIVE`(진행 중) · `ENDED`(종료) · `CANCELED`(취소됨, 입장·시작 불가) — 서버 시각 기준
 - `companyName` 은 선택. 없으면 프론트는 비워 둔다
 - `attempts`: 과제 ID → 응시 ID. 시작 전에는 빈 객체
+- `tasks`: 과제별 진행 상태 (회차 과제 순서). `submittedAt` 은 **모든 과제**를 낸 시각
 
 ### 1-3. `POST /api/entry/{invite}/consent` 감독 동의 + 환경 점검 결과
 ```json
 { "consentVersion": "v1", "envCheck": { "passed": true, "items": [ ... ], "phone": { ... } } }
 ```
 - `envCheck` 는 프론트 환경 점검 결과 JSON 그대로 (최대 20,000자). 다시 점검하면 덮어쓴다
-- 종료된 회차면 400. 응답: 1-2 와 같은 입장 정보
+- 종료·취소된 회차면 400. 응답: 1-2 와 같은 입장 정보
 
 ### 1-4. `POST /api/entry/{invite}/enter` 대기실 입장
 처음 들어온 시각만 기록한다 (`entered_at`). 응답: 입장 정보.
@@ -69,9 +72,14 @@
 - 과제마다 응시(attempt)를 만든다. **두 번 불러도 응시는 한 번만** (대상자 행 잠금, `SELECT ... FOR UPDATE`)
 - 응답: 입장 정보 (`attempts` 가 채워짐). 프론트는 첫 응시로 `/exam/{attemptId}?mode=live` 로 이동
 
-### 1-6. `POST /api/entry/{invite}/submit` 직접 제출
-- 아직 풀고 있는 응시를 모두 제출하고 `submit_kind=MANUAL`
-- 종료 시각이 지났으면 400 (스케줄러가 대신 제출한다)
+### 1-6. `POST /api/entry/{invite}/tasks/{taskId}/submit` 과제별 제출
+- 그 과제의 응시만 제출한다. 제출한 과제부터 채점을 시작한다 (팀원 1 채점 큐)
+- 모든 과제를 내면 대상자도 제출 완료 (`submittedAt`, `submit_kind=MANUAL`)
+- 이 회차 과제가 아니면 404, 시작 전이면 400, 종료 시각이 지났으면 400 (스케줄러가 남은 과제를 대신 제출한다)
+- 두 번 불러도 안전. 응답: 입장 정보
+
+### 1-6b. `POST /api/entry/{invite}/submit` 남은 과제 모두 제출 (시험 끝내기)
+- 아직 풀고 있는 응시를 모두 제출하고 `submit_kind=MANUAL`. 규칙은 1-6 과 같다
 
 ### 1-7. `POST /api/entry/{invite}/proctor-events` 감독 이벤트 1건
 ```json
@@ -96,11 +104,11 @@
 | `snapshot` | 선택, JPEG data URL 또는 base64. **카메라 이벤트만**, 최대 200KB, JPEG 매직(FF D8 FF) 확인 |
 
 - 시작하지 않은 응시자, 감독 없는 회차, 종료 5분이 지난 뒤의 요청은 400
-- 사진은 S3 `exam-snapshots/{회차ID}/{이벤트ID}.jpg` (SSE-S3, 비공개 버킷)
+- 사진은 S3 `exam-snapshots/{회차ID}/{이벤트ID}.jpg` (SSE-S3, 비공개 버킷, 회차 종료 30일 뒤 삭제)
 - **업로드 실패 시 이벤트도 롤백**한다. 프론트 아웃박스가 다시 보낸다 (네트워크 오류·5xx 만 재시도, 4xx 는 버림)
-- 응답 201: `{ "id": 12, "type": "NO_FACE", "source": "PC_CAM", "startedAt": "...", "durationMs": 2100, "confidence": 0.91, "detail": "{...}", "snapshot": "ok", "snapshotBytes": 14203 }`
+- 응답 201: `{ "id": 12, "type": "NO_FACE", "source": "PC_CAM", "startedAt": "...", "durationMs": 2100, "confidence": 0.91, "detail": "{...}", "snapshot": "ok", "snapshotBytes": 14203, "review": null, "reviewNote": null, "reviewedBy": null, "reviewedAt": null }`
 
-**이벤트 유형**
+**이벤트 유형** (DB 코드표 `proctor_event_types`: 경고 문구·심각도 LOW/MEDIUM/HIGH)
 
 | type | source | 뜻 |
 |---|---|---|
@@ -162,13 +170,16 @@ PC  ◀── paired {pairCode, phoneUrl} ──  서버   (PC 는 phoneUrl 을 
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| GET | `/api/console/sessions?companyId=` | 회차 목록 + 인원 집계 |
+| GET | `/api/console/sessions?companyId=` | 회차 목록 + 인원 집계 (취소한 회차는 `phase=CANCELED`, `canceledAt`) |
 | POST | `/api/console/sessions` | 회차 생성 `{companyId, title, startsAt, endsAt, proctoring, taskIds[]}` |
-| GET·PUT·DELETE | `/api/console/sessions/{id}` | 상세 · 수정(시작 전만) · 삭제(시작 전만) |
+| GET·PUT | `/api/console/sessions/{id}` | 상세 · 수정(시작 전만, 시간·과제·이름이 바뀌면 대상자에게 변경 안내 메일) |
+| POST | `/api/console/sessions/{id}/cancel` | 취소(시작 전만). **지우지 않고** `canceled_at` 을 남기고 대상자에게 취소 안내 메일 |
 | POST | `/api/console/sessions/{id}/participants` | 대상자 추가 `{participants:[{name,email}]}` → `{added, rejected:[{line,name,email,reason}]}` |
-| POST | `/api/console/sessions/{id}/participants/excel` | 엑셀(.xlsx, 2MB) 업로드. 첫 행에 `이름`·`이메일` |
-| POST | `/api/console/sessions/{id}/participants/{pid}/invite` | 초대 메일 다시 보내기 |
-| GET | `/api/console/sessions/{id}/participants/{pid}/events` | 감독 이벤트 목록 |
+| POST | `/api/console/sessions/{id}/participants/csv?dryRun=` | 대상자 CSV(.csv, 2MB, 최대 1,000명) 업로드. 첫 행 `이름,이메일`. UTF-8(BOM 가능)·MS949 모두 읽음. `dryRun=true` 면 저장 없이 미리 보기(`added` = 등록될 인원). 저장하면 원본을 `participant-csv/{회차}/{업로드 ms}.csv` 에 보관(`participants_csv_key`). 틀린 행 하나 때문에 전체를 거절하지 않음 |
+| GET | `/api/console/sessions/participants-template.csv` | 대상자 CSV 양식 내려받기 |
+| POST | `/api/console/sessions/{id}/participants/{pid}/invite` | 초대 메일 다시 보내기 (**새 토큰 발급, 이전 링크 무효**) |
+| GET | `/api/console/sessions/{id}/participants/{pid}/events` | 감독 이벤트 목록 (판정 포함) |
+| PUT | `/api/console/sessions/{id}/events/{eid}/review` | 담당자 판정 `{review: "OK"\|"SUSPECT"\|null, note, reviewerId}`. `null` 이면 판정을 지움. `reviewerId` 는 인증이 붙으면 로그인 정보로 바꾼다 |
 | GET | `/api/console/sessions/{id}/events/{eid}/snapshot` | 사진 (image/jpeg, no-store) |
 | GET | `/api/console/sessions/{id}/results` | 순위·분포·역량별 평균·상하위 비교·감독 합계·지표 |
 | GET | `/api/console/sessions/{id}/results.csv` | CSV (UTF-8 BOM, 수식 주입 방지) |
@@ -184,11 +195,15 @@ PC  ◀── paired {pairCode, phoneUrl} ──  서버   (PC 는 phoneUrl 을 
 | 동시 시작 | 시작 가능 여부는 서버 시각으로만. 프론트 시계는 믿지 않는다 |
 | 자동 제출 | 2초 주기 스케줄러가 `ends_at ≤ 지금` 이고 안 닫힌 회차를 찾아, 시작했고 미제출인 응시자를 전원 제출(`submit_kind=AUTO`). 회차마다 트랜잭션 분리, 두 번 돌아도 안전. 서버가 여러 대면 ShedLock 필요 |
 | 지연 지표 | `closed_at - ends_at` 을 결과 API `metrics.autoSubmitLagMs` 로 |
-| 사진 삭제 | 1시간 주기로 보관 기간 지난 사진 삭제. S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at` 은 남길 것) |
-| 초대 메일 | 대상자 등록 트랜잭션 **커밋 뒤** 비동기 발송. 결과는 `invite_status` (PENDING/SENT/FAILED) |
+| 사진 삭제 | 1시간 주기로 **회차 종료 30일**이 지난 사진 삭제 (`pair.exam.snapshot-retention-days`). S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at` 은 남길 것) |
+| 초대 메일 | 대상자 등록·다시 보내기 트랜잭션 **커밋 뒤** 비동기 발송. 토큰 원문은 메모리 이벤트로만 메일러에 넘긴다. 결과는 `invite_status` (PENDING/SENT/FAILED). 결과 기록은 두 컬럼만 바꾸는 UPDATE 로 한다 (그 사이 응시자가 시작한 기록을 덮어쓰지 않게) |
+| 하루 전 알림 | 5분 주기로 시작 24시간 안에 든 회차의 대상자에게 1번 (`reminded_at`). 초대 메일을 받은(SENT) 사람만, 시작 24시간 안에 초대된 사람은 건너뜀. 토큰 원문이 없으므로 링크 대신 "초대 메일의 링크" 안내 |
+| 변경·취소 안내 | 수정·취소 트랜잭션 커밋 뒤 대상자 전원에게 비동기 발송 |
 | 로그 | 초대 토큰이 경로에 들어가므로 접근 로그에서 가린다. 메일 주소도 로그에 남기지 않는다 |
 
 ## 5. 테이블
 
-pAIr-back `backend/src/main/resources/db/migration/V1__exam_sessions.sql` 참고:
-`exam_sessions`, `exam_session_tasks`, `exam_participants`, `participant_attempts`, `proctor_consents`, `proctor_events`
+pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__exam_sessions.sql`, `V2__exam_decisions.sql` 참고:
+`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`, `participant_attempts`, `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`
+
+> `participant_attempts` 는 ERD 의 `attempts.participant_id` 를 대신한다. 응시(attempts)가 아직 파일(`pilot-data`)에 있어서, attempts 가 DB 로 옮겨질 때 없앤다.
