@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>AI 서비스 아키텍처</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .panel { position: absolute; background: #FFF; border: 1.5px solid #DCE1EC; border-radius: 16px; box-shadow: 0 2px 8px rgba(31,36,51,0.06); padding: 20px 22px; }
+  .ph { font-size: 19px; font-weight: 800; color: #233A7A; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .ph::before { content: ''; width: 5px; height: 20px; border-radius: 3px; background: #2F6BE0; }
+  .ptxt { font-size: 15px; line-height: 1.6; color: #3A4152; }
+  .check { font-size: 15.5px; font-weight: 700; margin: 9px 0; display: flex; gap: 10px; align-items: center; }
+  .check::before { content: '✓'; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #1C8A48; color: #FFF; font-size: 13px; font-weight: 800; flex: none; }
+  .scn { display: flex; gap: 14px; align-items: center; padding: 13px 0; border-top: 1px solid #EEF0F5; }
+  .scn:first-of-type { border-top: none; }
+  .scn .ic { font-size: 34px; width: 44px; text-align: center; flex: none; }
+  .scn .t { font-size: 17px; font-weight: 800; }
+  .scn .d { font-size: 13.5px; color: #5B6275; font-weight: 600; margin-top: 3px; }
+  .seq { display: flex; gap: 10px; align-items: center; background: #F4F8FF; border: 1.5px solid #D6E3FB; border-radius: 12px; padding: 10px 12px; font-size: 14.5px; font-weight: 700; line-height: 1.35; }
+  .seqar { text-align: center; color: #9AA1B2; font-size: 13px; line-height: 13px; margin: 4px 0; }
+  .ts { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid #EEF0F5; }
+  .ts:first-of-type { border-top: none; }
+  .ts .k { width: 84px; font-size: 14px; font-weight: 800; color: #233A7A; flex: none; }
+  .ts img { width: 34px; height: 34px; object-fit: contain; }
+  .ts .v { font-size: 14px; font-weight: 700; color: #3A4152; }
+  .inz { position: relative; }
+  .step3.card { padding: 6px; }
+  .step3 .emo.md { font-size: 32px; line-height: 38px; }
+  .step3 .name { font-size: 16.5px; margin-top: 2px; }
+  .step3 .mono { margin-top: 0; font-size: 12px; }
+  #llm .mono { font-size: 12px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="title">AI 서비스 아키텍처<span>(AI Service Architecture)</span></div>
+<div class="subtitle">Spring AI 기반 Agent · RAG · Tool Calling · MCP 통합 구조</div>
+
+<!-- 왼쪽 -->
+<div class="panel" style="left:40px;top:130px;width:300px;height:190px">
+  <div class="ph">개요</div>
+  <div class="ptxt">LLM Agent가 RAG · Tool · MCP로 근거를 모아 과제를 만들고, 응시를 채점하고, 결과를 설명하는 구조</div>
+</div>
+<div class="panel" style="left:40px;top:336px;width:300px;height:270px">
+  <div class="ph">주요 기능</div>
+  <div class="check">응시 AI 어시스턴트 (SSE)</div>
+  <div class="check">교차 채점 (Claude + GPT)</div>
+  <div class="check">문서 기반 RAG 검색</div>
+  <div class="check">Tool Calling · MCP 연동</div>
+  <div class="check">대화 기억 (Chat Memory)</div>
+</div>
+<div class="panel" style="left:40px;top:622px;width:300px;height:428px">
+  <div class="ph">AI 활용 시나리오</div>
+  <div class="scn"><div class="ic">💬</div><div><div class="t">응시 AI 어시스턴트</div><div class="d">과제 풀이 중 질문 · 실시간 답변</div></div></div>
+  <div class="scn"><div class="ic">⚖️</div><div><div class="t">채점 Agent</div><div class="d">근거를 찾아 6개 역량 판정</div></div></div>
+  <div class="scn"><div class="ic">🧩</div><div><div class="t">과제 생성 Agent</div><div class="d">초안 → 정답 · 테스트 검증 → 검수</div></div></div>
+  <div class="scn"><div class="ic">📊</div><div><div class="t">리포트 Q&amp;A Agent</div><div class="d">회차 결과를 자연어로 질문</div></div></div>
+</div>
+
+<!-- 가운데 위 -->
+<div class="abs card h" id="users" style="left:380px;top:130px;width:660px;height:72px;justify-content:center;gap:16px">
+  <div class="emo md">👥</div>
+  <div class="name">사용자</div>
+  <div class="chips" style="margin-top:0"><span class="chip blue">응시자</span><span class="chip orange">기업 담당자</span><span class="chip purple">관리자</span></div>
+</div>
+<div class="abs card h" id="fe" style="left:380px;top:258px;width:660px;height:104px">
+  <img class="lg" src="logos/react-original.svg">
+  <div>
+    <div class="name">Frontend (React)</div>
+    <div class="chips"><span class="chip blue">채팅 UI · SSE</span><span class="chip blue">과제 생성 폼</span><span class="chip blue">리포트 Q&amp;A</span><span class="chip blue">채점 결과</span></div>
+  </div>
+</div>
+<div class="zone z-purple slim" id="llm" style="left:1080px;top:130px;width:340px;height:232px">
+  <span class="tag">LLM</span>
+  <div class="card h" style="gap:14px;padding:8px 16px"><img class="lg md" src="logos/si-openai.svg"><div><div class="name sm">OpenAI</div><div class="mono">gpt-6-luna · gpt-6.1-terra</div></div></div>
+  <div class="card h" style="gap:14px;padding:8px 16px"><img class="lg md" src="logos/si-anthropic.svg"><div><div class="name sm">Anthropic</div><div class="mono">claude-haiku-5-5</div></div></div>
+</div>
+
+<!-- BACKEND -->
+<div class="zone z-green" id="back" style="left:380px;top:418px;width:1040px;height:436px;gap:40px">
+  <span class="tag">BACKEND</span>
+  <span class="zname"><img src="logos/si-springboot.svg">Spring Boot + Spring AI</span>
+  <div class="r" style="gap:24px">
+    <div class="card f0" style="width:210px;height:100%">
+      <img class="lg md" src="logos/si-spring.svg">
+      <div class="name sm" style="margin-top:6px">ChatClient</div>
+      <div class="chips" style="margin-top:6px"><span class="chip green">Chat Memory</span><span class="chip green">구조화 출력</span></div>
+    </div>
+    <div class="c" style="gap:40px">
+      <div class="r" style="flex:1.3;display:flex">
+    <div class="zone z-purple slim inz" id="agent" style="flex:1;flex-direction:row;gap:40px;background:#F6F1FE">
+      <span class="tag">AI AGENT</span>
+      <span class="abs" style="right:24px;top:18px;font-size:13.5px;font-weight:800;color:#6B3FD6">↻ 근거가 모자라면 다시 계획</span>
+      <div class="card step3" id="plan"><div class="emo md">🧭</div><div class="name">의도 파악 · 계획</div><div class="mono">Plan</div></div>
+      <div class="card step3" id="tool"><div class="emo md">🛠️</div><div class="name">도구 선택 · 호출</div><div class="mono">Tool / MCP</div></div>
+      <div class="card step3" id="act"><div class="emo md">✅</div><div class="name">판정 · 응답</div><div class="mono">Act</div></div>
+    </div>
+      </div>
+      <div class="r" style="gap:24px">
+    <div class="card h" id="rag" style="gap:12px;padding:10px 16px"><div class="emo md">📚</div><div><div class="name">RAG</div><div class="desc" style="font-size:13.5px">문서 조각 검색</div></div></div>
+    <div class="card h" id="tc" style="flex:1.6;gap:14px"><div class="emo md">🔧</div><div><div class="name">Tool Calling</div><div class="chips"><span class="chip orange">과제 검증 실행</span><span class="chip orange">응시 기록 조회</span><span class="chip orange">점수 통계</span></div></div></div>
+    <div class="card h" id="mcp" style="gap:12px;padding:10px 16px"><img class="lg md" src="logos/si-modelcontextprotocol.svg"><div><div class="name">MCP</div><div class="desc" style="font-size:13.5px">외부 도구 연결</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 아래 -->
+<div class="abs card" style="left:380px;top:894px;width:234px;height:156px;background:#F4F8FF;border-color:#D6E3FB">
+  <div class="name sm" style="margin-top:0">비용 절감</div>
+  <div class="chips"><span class="chip blue">프롬프트 캐시</span><span class="chip blue">Batch API</span><span class="chip blue">3회 다수결</span></div>
+</div>
+<div class="abs card" id="vec" style="left:638px;top:894px;width:197.2px;height:156px"><img class="lg" src="logos/postgresql-original.svg"><div class="name sm">Vector DB</div><div class="desc" style="font-size:13.5px">pgvector</div></div>
+<div class="abs card" id="db" style="left:859.2px;top:894px;width:145.7px;height:156px"><img class="lg" src="logos/postgresql-original.svg"><div class="name sm">업무 DB</div><div class="desc" style="font-size:13.5px">응시 · 점수</div></div>
+<div class="abs card" id="sbx" style="left:1029px;top:894px;width:145.7px;height:156px"><img class="lg" src="logos/docker-original.svg"><div class="name sm">샌드박스</div><div class="desc" style="font-size:13.5px">생성 과제 검증</div></div>
+<div class="abs card" id="ext" style="left:1198.7px;top:894px;width:197.3px;height:156px"><div class="logos" style="gap:10px"><img class="lg md" src="logos/github-original.svg"><div class="emo md">🔍</div></div><div class="name sm">외부 MCP 서버</div><div class="desc" style="font-size:13.5px">GitHub · 웹 검색</div></div>
+
+<!-- 오른쪽 -->
+<div class="panel" style="left:1460px;top:130px;width:300px;height:500px">
+  <div class="ph">처리 흐름</div>
+  <div class="seq"><span class="num">1</span>사용자 요청<br>(질문 · 제출 · 생성)</div><div class="seqar">▼</div>
+  <div class="seq"><span class="num">2</span>Agent가 의도 파악 · 계획</div><div class="seqar">▼</div>
+  <div class="seq"><span class="num">3</span>RAG로 근거 문서 검색</div><div class="seqar">▼</div>
+  <div class="seq"><span class="num">4</span>Tool · MCP 호출<br>(DB 조회 · 과제 검증 · 외부)</div><div class="seqar">▼</div>
+  <div class="seq"><span class="num">5</span>LLM이 종합 · 판정<br>(채점은 Claude + GPT 교차)</div><div class="seqar">▼</div>
+  <div class="seq"><span class="num">6</span>결과 저장 · 화면 표시</div>
+</div>
+<div class="panel" style="left:1460px;top:646px;width:300px;height:404px">
+  <div class="ph">기술 스택</div>
+  <div class="ts"><span class="k">Framework</span><img src="logos/si-springboot.svg"><img src="logos/si-spring.svg"><span class="v">Spring AI</span></div>
+  <div class="ts"><span class="k">LLM</span><img src="logos/si-openai.svg"><img src="logos/si-anthropic.svg"><span class="v">OpenAI · Claude</span></div>
+  <div class="ts"><span class="k">Vector DB</span><img src="logos/postgresql-original.svg"><span class="v">pgvector</span></div>
+  <div class="ts"><span class="k">MCP</span><img src="logos/si-modelcontextprotocol.svg"><img src="logos/github-original.svg"><span class="v">Spring AI MCP</span></div>
+  <div class="ts"><span class="k">검증</span><img src="logos/docker-original.svg"><span class="v">Docker</span></div>
+  <div class="ts"><span class="k">Frontend</span><img src="logos/react-original.svg"><img src="logos/vitejs-original.svg"><span class="v">React · Vite</span></div>
+</div>
+
+<script>
+const B = '#2F6BE0', P = '#6B3FD6', O = '#C25A12', K = '#4B5368';
+window.WIRES = [
+  ['users', 'b', 'fe', 't', { at: 640, num: 1, label: '요청', color: B }],
+  ['fe', 't', 'users', 'b', { at: 780, num: 6, label: '응답', color: B }],
+  ['fe', 'b', 'agent', 't', { at: 900, both: true, label: 'REST · SSE', color: B }],
+  ['agent', 't', 'llm', 'b', { at: 1250, both: true, num: 5, label: '추론 · 판정', color: P }],
+  ['plan', 'r', 'tool', 'l', { color: P }],
+  ['tool', 'r', 'act', 'l', { color: P }],
+  ['agent', 'b', 'rag', 't', { at: 736.6, num: 3, color: K }],
+  ['agent', 'b', 'tc', 't', { at: 1017, num: 4, color: O }],
+  ['agent', 'b', 'mcp', 't', { at: 1297.4, color: O }],
+  ['rag', 'b', 'vec', 't', { at: 736.6, label: '유사도 검색', color: K }],
+  ['tc', 'b', 'db', 't', { at: 932, label: '조회', color: O }],
+  ['tc', 'b', 'sbx', 't', { at: 1101.9, label: '검증', color: O }],
+  ['mcp', 'b', 'ext', 't', { at: 1297.4, label: '표준 연결', color: O }],
+];
+</script>
+<script src="common.js"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600;700&display=swap");
+
+/* ── 간격 기준 ─────────────────────────────
+   바깥 여백 40 · 구역 사이 56(화살표 자리) · 구역 안 여백 24
+   구역 머리 72 · 카드 사이 16 · 모서리 20(구역) / 16(카드)
+   로고 96(대표) · 72(기본) · 48(작게) */
+:root { --gap: 16px; --pad: 24px; --head: 72px; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #F6F7FB; }
+body {
+  width: 1800px; height: 1100px; position: relative; overflow: hidden;
+  font-family: 'Pretendard', 'Malgun Gothic', sans-serif; font-weight: 600;
+  color: #1F2433; word-break: keep-all;
+}
+.abs { position: absolute; }
+
+/* 문서 제목: "한글 이름 (English Name)" + 한 줄 설명 */
+.title { position: absolute; left: 40px; top: 30px; font-size: 34px; font-weight: 800; letter-spacing: -0.6px; }
+.title span { font-size: 24px; font-weight: 700; color: #6B7285; margin-left: 8px; letter-spacing: -0.3px; }
+.subtitle { position: absolute; right: 40px; top: 34px; background: #FFF; border: 1.5px solid #C9D3EA; border-radius: 999px; padding: 9px 22px; font-size: 16.5px; font-weight: 700; color: #2B4790; }
+.title { top: 34px; }
+
+/* 구역: 안쪽은 flex 로 자동 배치 */
+.zone {
+  position: absolute; border-radius: 20px; border: 1.5px solid;
+  padding: var(--head) var(--pad) var(--pad);
+  display: flex; flex-direction: column; gap: var(--gap);
+}
+.zone > .tag {
+  position: absolute; left: var(--pad); top: 18px;
+  font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 1.6px;
+}
+.zone > .zname { position: absolute; left: var(--pad); top: 36px; font-size: 21px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.zone > .zname img { width: 26px; height: 26px; }
+.zone.slim { --head: 52px; }
+.zone.slim > .tag { top: 20px; }
+.z-blue   { background: #EAF1FE; border-color: #BCD2FA; } .z-blue   > .tag { color: #2F6BE0; }
+.z-green  { background: #EAF6EE; border-color: #B9DFC4; } .z-green  > .tag { color: #1C8A48; }
+.z-purple { background: #F3EEFD; border-color: #D5C6F6; } .z-purple > .tag { color: #6B3FD6; }
+.z-gray   { background: #EEF0F5; border-color: #D3D7E2; } .z-gray   > .tag { color: #4B5368; }
+.z-orange { background: #FDF1E6; border-color: #F3CFAE; } .z-orange > .tag { color: #C25A12; }
+.z-navy   { background: #E8ECF6; border-color: #B7C1DD; } .z-navy   > .tag { color: #233A7A; }
+.z-white  { background: rgba(255,255,255,0.75); border-color: #C9D0E0; } .z-white > .tag { color: #1F2433; font-family: 'Pretendard', sans-serif; font-size: 16px; font-weight: 800; letter-spacing: 0; display: flex; align-items: center; gap: 8px; }
+.z-white > .tag img { width: 28px; height: 28px; }
+
+.r { display: flex; gap: var(--gap); flex: 1; min-height: 0; }
+.c { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-width: 0; }
+
+
+/* 카드: 큰 로고 + 이름 + 한 줄 설명 */
+.card {
+  flex: 1; min-width: 0; min-height: 0;
+  background: #FFF; border: 1.5px solid #DCE1EC; border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(31,36,51,0.06);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 14px;
+}
+.card.h { flex-direction: row; justify-content: flex-start; text-align: left; gap: 20px; padding: 14px 24px; }
+.logos { display: flex; gap: 14px; align-items: center; justify-content: center; }
+.lg { width: 72px; height: 72px; object-fit: contain; flex: none; }
+.lg.xl { width: 96px; height: 96px; }
+.lg.md { width: 48px; height: 48px; }
+.emo { font-size: 60px; line-height: 72px; flex: none; }
+.emo.md { font-size: 40px; line-height: 48px; }
+.name { font-size: 22px; font-weight: 800; margin-top: 10px; line-height: 1.25; }
+.card.h .name { margin-top: 0; }
+.name.sm { font-size: 18px; }
+.desc { font-size: 15px; font-weight: 600; color: #5B6275; margin-top: 4px; line-height: 1.4; }
+.mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; color: #6B7285; margin-top: 4px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 10px; }
+.card.h .chips { justify-content: flex-start; }
+.chip { font-size: 13.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px; background: #F1F3F8; color: #3A4152; }
+.chip.blue { background: #DCE8FD; color: #2F6BE0; }
+.chip.green { background: #DBF0E2; color: #1C8A48; }
+.chip.purple { background: #E7DEFB; color: #6B3FD6; }
+.chip.orange { background: #FCE3CC; color: #C25A12; }
+
+.note { background: #FFF8E6; border-color: #F2D49B; }
+.note .name { color: #A1600B; }
+
+.num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%; background: #2F6BE0; color: #FFF;
+  font-size: 14px; font-weight: 800; flex: none;
+}
+
+/* 연결선 · 라벨 (선 옆에 작게) */
+#wires { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.wlabel {
+  position: absolute; white-space: nowrap; z-index: 6;
+  font-size: 13px; font-weight: 800; color: #4B5368;
+  display: flex; align-items: center; gap: 5px; line-height: 1;
+}
+.wlabel .num { width: 20px; height: 20px; font-size: 11.5px; }
+.wlabel.stack { flex-direction: column; gap: 4px; text-align: center; line-height: 1.25; }
+.card.f0, .f0 { flex: none; }

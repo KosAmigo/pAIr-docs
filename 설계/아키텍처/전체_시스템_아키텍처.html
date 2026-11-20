@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>전체 시스템 아키텍처</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .sai { background: #1C8A48; border: none; }
+  .sai .name { color: #FFF; }
+  .sai .chip { background: rgba(255,255,255,.18); color: #FFF; }
+</style>
+</head>
+<body>
+<div class="title">전체 시스템 아키텍처<span>(System Architecture)</span></div>
+<div class="subtitle">React + Spring Boot + Spring AI (Agent · RAG · Tool · MCP) 기반 풀스택 구조</div>
+
+<!-- FRONTEND -->
+<div class="zone z-blue" style="left:40px;top:130px;width:360px;height:930px">
+  <span class="tag">FRONTEND</span><span class="zname">프런트엔드 · pAIr-front</span>
+  <div class="card" id="web" style="flex:1.2">
+    <div class="logos"><img class="lg xl" src="logos/react-original.svg"><img class="lg" src="logos/typescript-original.svg"><img class="lg" src="logos/vitejs-original.svg"></div>
+    <div class="name">웹 앱</div>
+    <div class="mono">React 19 · TypeScript · Vite</div>
+    <div class="chips"><span class="chip blue">응시자</span><span class="chip blue">기업 담당자</span><span class="chip blue">감독관</span><span class="chip blue">운영자</span></div>
+  </div>
+  <div class="card" id="cam">
+    <img class="lg xl" src="logos/si-mediapipe.svg">
+    <div class="name">카메라 감독</div>
+    <div class="mono">MediaPipe</div>
+  </div>
+</div>
+</div>
+
+<!-- BACKEND -->
+<div class="zone z-green" id="zBack" style="left:456px;top:130px;width:800px;height:560px">
+  <span class="tag">BACKEND</span><span class="zname">백엔드 · pAIr-back</span>
+  <div class="r" style="flex:1.4">
+    <div class="card" id="boot">
+      <div class="logos"><img class="lg xl" src="logos/si-springboot.svg"><img class="lg xl" src="logos/java-original.svg"></div>
+      <div class="name">Spring Boot · Java 21</div>
+      <div class="desc">REST API · SSE 스트리밍</div>
+    </div>
+    <div class="card">
+      <img class="lg xl" src="logos/si-spring.svg">
+      <div class="name">Spring Security</div>
+      <div class="desc">역할별 권한 · 회사별 데이터 분리</div>
+    </div>
+  </div>
+  <div class="card h sai" id="sai">
+    <img class="lg xl" src="logos/si-spring.svg" style="filter:brightness(0) invert(1)">
+    <div>
+      <div class="name">Spring AI</div>
+      <div class="chips"><span class="chip">AI Agent</span><span class="chip">RAG</span><span class="chip">Tool Calling</span><span class="chip">MCP</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- AI -->
+<div class="zone z-purple" id="zAi" style="left:1312px;top:130px;width:448px;height:500px">
+  <span class="tag">AI MODELS</span><span class="zname">LLM · MCP</span>
+  <div class="card h"><img class="lg" src="logos/si-openai.svg"><div><div class="name">OpenAI</div><div class="desc">어시스턴트 · 채점 · 임베딩</div></div></div>
+  <div class="card h"><img class="lg" src="logos/si-anthropic.svg"><div><div class="name">Anthropic</div><div class="desc">Claude 교차 채점</div></div></div>
+  <div class="card h"><img class="lg" src="logos/si-modelcontextprotocol.svg"><div><div class="name">외부 MCP 서버</div><div class="desc">GitHub · 웹 검색</div></div></div>
+</div>
+
+<!-- DATA -->
+<div class="zone z-gray" style="left:456px;top:746px;width:520px;height:314px">
+  <span class="tag">DATA</span><span class="zname">저장소</span>
+  <div class="r">
+    <div class="card" id="pg"><img class="lg" src="logos/postgresql-original.svg"><div class="name sm">PostgreSQL</div><div class="desc">+ pgvector</div></div>
+    <div class="card" id="redis"><img class="lg" src="logos/redis-original.svg"><div class="name sm">Redis</div><div class="desc">채점 큐 · 세션</div></div>
+    <div class="card" id="s3"><img class="lg" src="logos/si-amazons3.svg"><div class="name sm">AWS S3</div><div class="desc">CSV · 감독 사진</div></div>
+  </div>
+</div>
+
+<!-- EXEC -->
+<div class="zone z-navy" style="left:1016px;top:746px;width:240px;height:314px">
+  <span class="tag">EXAM ENV</span><span class="zname">응시 환경 서버</span>
+  <div class="card" id="sbx"><img class="lg" src="logos/docker-original.svg"><div class="name sm">Docker<br>샌드박스</div></div>
+</div>
+
+<!-- EXTERNAL -->
+<div class="zone z-orange" id="zExt" style="left:1312px;top:746px;width:448px;height:314px">
+  <span class="tag">EXTERNAL</span><span class="zname">외부 서비스</span>
+  <div class="card h"><div class="emo md">✉️</div><div><div class="name">메일 서버 (SMTP)</div><div class="desc">입장 링크 · 초대</div></div></div>
+  <div class="card h"><div class="emo md">💳</div><div><div class="name">결제 대행사</div><div class="desc">크레딧 구매</div></div></div>
+</div>
+
+<script>
+window.WIRES = [
+  ['web', 'r', 'boot', 'l', { both: true, at: 330, num: 1, label: 'REST<br>SSE', stack: true, color: '#2F6BE0' }],
+  ['cam', 'r', 'zBack', 'l', { dash: true, at: 640, label: '감독<br>이벤트', stack: true }],
+  ['sai', 'r', 'zAi', 'l', { at: 572, num: 2, label: 'AI<br>호출', stack: true, color: '#6B3FD6' }],
+  ['zBack', 'b', 'pg', 't', { at: 553.3, num: 5, label: '저장', color: '#1F2433' }],
+  ['zBack', 'b', 'redis', 't', { at: 716, num: 4, label: '채점 큐', color: '#C0392B' }],
+  ['zBack', 'b', 's3', 't', { at: 878.7, label: '파일' }],
+  ['zBack', 'b', 'sbx', 't', { at: 1210, num: 3, label: '코드 실행', color: '#233A7A' }],
+  ['zBack', 'r', 'zExt', 't', { aat: 662, bat: 1536, label: '메일 · 결제', color: '#C25A12' }],
+];
+</script>
+<script src="common.js"></script>
+</body>
+</html>

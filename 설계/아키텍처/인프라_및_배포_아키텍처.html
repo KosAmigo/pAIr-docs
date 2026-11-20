@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>인프라 및 배포 아키텍처</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  .badge { font-size: 12.5px; font-weight: 800; padding: 3px 10px; border-radius: 999px; margin-top: 8px; }
+  .b-blue { background: #DCE8FD; color: #2F6BE0; }
+  .b-green { background: #DBF0E2; color: #1C8A48; }
+  .ext .name { font-size: 18px; }
+  .ext .desc { font-size: 13.5px; margin-top: 2px; }
+  .ext.card.h { gap: 16px; padding: 10px 18px; }
+  .strip { flex-direction: row; align-items: stretch; gap: 40px; padding: 16px 24px; }
+  .strip .card { padding: 8px; }
+  .strip .name { font-size: 16px; margin-top: 6px; }
+  .strip .desc { font-size: 13px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="title">인프라 및 배포 아키텍처<span>(Infrastructure &amp; Deployment Architecture)</span></div>
+<div class="subtitle">React + Spring Boot + AI 서비스의 Jenkins CI/CD 기반 AWS 운영 구조</div>
+
+<!-- USERS -->
+<div class="zone z-blue" style="left:40px;top:130px;width:220px;height:740px">
+  <span class="tag">USERS</span><span class="zname">사용자</span>
+  <div class="card" id="pc"><div class="emo">🖥️</div><div class="name">PC 브라우저</div><div class="desc">응시 · 콘솔 · 관리자</div></div>
+  <div class="card" id="phone"><div class="emo">📱</div><div class="name">휴대폰</div><div class="desc">보조 감독 캠</div></div>
+</div>
+
+<!-- AWS -->
+<div class="zone z-orange" style="left:316px;top:130px;width:1068px;height:740px;background:#FFF8F1">
+  <span class="tag">AWS CLOUD</span>
+  <span class="zname"><img src="logos/amazonwebservices-original-wordmark.svg" style="width:44px">Amazon Web Services</span>
+</div>
+
+<div class="zone z-white slim" id="app" style="left:340px;top:202px;width:540px;height:400px;gap:40px">
+  <span class="tag"><img src="logos/si-amazonec2.svg">EC2 · 앱 서버 <span class="mono" style="margin:0">Docker Compose</span></span>
+  <div class="card h" id="nginx" style="flex:0.7">
+    <img class="lg" src="logos/nginx-original.svg" style="width:96px">
+    <div><div class="name">Nginx</div><div class="desc">HTTPS · 정적 파일 · /api 프록시</div></div>
+  </div>
+  <div class="r">
+    <div class="card" id="blue"><img class="lg" src="logos/si-springboot.svg"><div class="name sm">Spring Boot</div><div class="badge b-blue">BLUE · 운영 중</div></div>
+    <div class="card" id="green" style="border-style:dashed"><img class="lg" src="logos/si-springboot.svg"><div class="name sm">Spring Boot</div><div class="badge b-green">GREEN · 새 버전</div></div>
+    <div class="card"><img class="lg" src="logos/redis-original.svg"><div class="name sm">Redis</div><div class="desc">채점 큐 · 세션</div></div>
+  </div>
+</div>
+
+<div class="zone z-white slim" id="managed" style="left:920px;top:202px;width:440px;height:180px">
+  <span class="tag">관리형 서비스</span>
+  <div class="r">
+    <div class="card" style="padding:8px"><img class="lg md" src="logos/si-amazonrds.svg"><div class="name sm" style="margin-top:6px">RDS (PostgreSQL)</div><div class="desc" style="font-size:13.5px;margin-top:2px">pgvector</div></div>
+    <div class="card" style="padding:8px"><img class="lg md" src="logos/si-amazons3.svg"><div class="name sm" style="margin-top:6px">S3</div><div class="desc" style="font-size:13.5px;margin-top:2px">CSV · 감독 사진</div></div>
+  </div>
+</div>
+
+<div class="zone z-white slim" id="exec" style="left:920px;top:422px;width:440px;height:180px">
+  <span class="tag"><img src="logos/si-amazonec2.svg">EC2 · 응시 환경 서버</span>
+  <div class="r">
+    <div class="card"><img class="lg md" src="logos/docker-original.svg"><div class="name sm" style="margin-top:6px">응시 A</div></div>
+    <div class="card"><img class="lg md" src="logos/docker-original.svg"><div class="name sm" style="margin-top:6px">응시 B</div></div>
+    <div class="card"><img class="lg md" src="logos/docker-original.svg"><div class="name sm" style="margin-top:6px">응시 …</div></div>
+  </div>
+</div>
+
+<div class="zone z-white slim" id="ci" style="left:340px;top:642px;width:1020px;height:204px">
+  <span class="tag"><img src="logos/si-amazonec2.svg">EC2 · CI / 모니터링</span>
+  <div class="r">
+    <div class="card h"><img class="lg xl" src="logos/jenkins-original.svg"><div><div class="name">Jenkins</div><div class="desc">테스트 · 빌드 · 배포</div></div></div>
+    <div class="card h"><img class="lg xl" src="logos/prometheus-original.svg"><div><div class="name">Prometheus</div><div class="desc">지표 수집</div></div></div>
+    <div class="card h"><img class="lg xl" src="logos/grafana-original.svg"><div><div class="name">Grafana</div><div class="desc">대시보드 · 알림</div></div></div>
+  </div>
+</div>
+
+<!-- EXTERNAL -->
+<div class="zone z-purple" id="ext" style="left:1440px;top:130px;width:320px;height:420px">
+  <span class="tag">EXTERNAL</span><span class="zname">외부 API</span>
+  <div class="card h ext"><img class="lg md" src="logos/si-openai.svg"><div><div class="name">OpenAI</div><div class="desc">어시스턴트 · 채점</div></div></div>
+  <div class="card h ext"><img class="lg md" src="logos/si-anthropic.svg"><div><div class="name">Anthropic</div><div class="desc">교차 채점</div></div></div>
+  <div class="card h ext"><div class="emo md">✉️</div><div><div class="name">메일 (SMTP)</div><div class="desc">입장 링크 · 초대</div></div></div>
+  <div class="card h ext"><div class="emo md">💳</div><div><div class="name">결제 대행사</div><div class="desc">크레딧 구매</div></div></div>
+</div>
+
+<!-- SOURCE · REGISTRY -->
+<div class="zone z-gray" style="left:1440px;top:606px;width:320px;height:264px">
+  <span class="tag">SOURCE · REGISTRY</span><span class="zname">코드 · 이미지</span>
+  <div class="card h ext" id="gh"><img class="lg md" src="logos/github-original.svg"><div><div class="name">GitHub</div><div class="desc">front · back 저장소</div></div></div>
+  <div class="card h ext" id="hub"><img class="lg md" src="logos/docker-original.svg"><div><div class="name">Docker Hub</div><div class="desc">앱 · 샌드박스 이미지</div></div></div>
+</div>
+
+<!-- 배포 흐름 -->
+<div class="zone z-navy strip" style="left:40px;top:926px;width:1720px;height:134px">
+  <div class="f0" style="width:150px;display:flex;flex-direction:column;justify-content:center">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:1.6px;color:#233A7A">CI / CD</div>
+    <div style="font-size:22px;font-weight:800;margin-top:4px">배포 흐름</div>
+    <div class="desc" style="font-size:14px">블루그린 무중단</div>
+  </div>
+  <div class="card" id="s1"><img class="lg md" src="logos/github-original.svg"><div class="name">git push</div></div>
+  <div class="card" id="s2"><img class="lg md" src="logos/jenkins-original.svg"><div class="name">테스트 · 빌드</div></div>
+  <div class="card" id="s3"><img class="lg md" src="logos/docker-original.svg"><div class="name">이미지 push</div></div>
+  <div class="card" id="s4"><img class="lg md" src="logos/si-springboot.svg"><div class="name">Green 기동</div></div>
+  <div class="card" id="s5"><div class="emo md">✅</div><div class="name">헬스 체크</div></div>
+  <div class="card" id="s6"><img class="lg md" src="logos/nginx-original.svg" style="width:72px"><div class="name">Nginx 전환</div></div>
+  <div class="card" id="s7"><img class="lg md" src="logos/si-springboot.svg" style="filter:grayscale(1);opacity:.5"><div class="name">Blue 종료</div></div>
+</div>
+
+<script>
+const B = '#2F6BE0', N = '#233A7A', P = '#6B3FD6', G = '#1C8A48', O = '#C25A12';
+window.WIRES = [
+  ['pc', 'r', 'nginx', 'l', { both: true, at: 312, label: 'HTTPS', color: B }],
+  ['phone', 'r', 'app', 'l', { both: true, at: 566, label: 'HTTPS', color: B }],
+  ['nginx', 'b', 'blue', 't', { at: 440.7, label: '/api', color: B }],
+  ['nginx', 'b', 'green', 't', { at: 610, dash: true, label: '전환', color: G }],
+  ['app', 'r', 'managed', 'l', { at: 292, label: 'DB<br>파일', stack: true }],
+  ['app', 'r', 'exec', 'l', { at: 512, label: '코드<br>실행', stack: true, color: N }],
+  ['app', 't', 'ext', 'l', { aat: 800, bat: 166, label: 'AI API · 메일 · 결제', color: P }],
+  ['gh', 'l', 'ci', 'r', { at: 716, num: 1, label: 'Webhook', stack: true, color: N }],
+  ['ci', 'r', 'hub', 'l', { at: 808, num: 2, label: 'push', stack: true, color: N }],
+  ['ci', 't', 'app', 'b', { at: 450, num: 3, label: 'SSH 배포 · 이미지 pull', color: N }],
+  ['ci', 't', 'app', 'b', { at: 850, dash: true, label: '지표 수집', color: O }],
+  ['s1', 'r', 's2', 'l', { color: N }], ['s2', 'r', 's3', 'l', { color: N }], ['s3', 'r', 's4', 'l', { color: N }],
+  ['s4', 'r', 's5', 'l', { color: N }], ['s5', 'r', 's6', 'l', { color: N }], ['s6', 'r', 's7', 'l', { color: N }],
+];
+</script>
+<script src="common.js"></script>
+</body>
+</html>
