@@ -81,6 +81,23 @@
 ### 1-6b. `POST /api/entry/{invite}/submit` 남은 과제 모두 제출 (시험 끝내기)
 - 아직 풀고 있는 응시를 모두 제출하고 `submit_kind=MANUAL`. 규칙은 1-6 과 같다
 
+### 1-8. `POST /api/entry/{invite}/env-scan` 환경 점검 사진 1장
+방 360도는 휴대폰을 12구간(30°씩)으로 나눠 구간마다 한 장, 책상 위는 몇 장을 올립니다. 시험 시작 전 입장 단계에서 올립니다.
+```json
+{ "stage": "ROOM", "angle": 45, "objects": ["person", "cell phone"], "image": "data:image/jpeg;base64,/9j/4AAQ..." }
+```
+| 필드 | 규칙 |
+|---|---|
+| `stage` | `ROOM`(방 360도) · `DESK`(책상 위) |
+| `angle` | 방 스캔에서 이 사진을 찍은 방향 0~359. 책상은 비움 |
+| `objects` | 사진에서 감지한 물체 이름, 최대 12개 |
+| `image` | JPEG 만, 감독 사진과 같은 크기 한도 |
+- 응답 `201`: `{id, participantId, stage, angle, objects[], phoneSuspect, sizeBytes, capturedAt, deleted}`. `objects` 에 `cell phone` 이 있으면 `phoneSuspect=true`.
+- 감독을 쓰지 않는 회차, 취소된 회차, 종료 5분 뒤, 대상자당 100장 초과는 거절(400). 잘못된 링크는 404.
+- 감독 이벤트(`proctor_events`)와 **따로** `env_scan_photos` 테이블에 저장해 이벤트 목록·통계에 섞이지 않습니다. 파일은 감독 사진과 같은 저장소(`env-scan/{회차}/{사진}.jpg`)에 올리고, 회차 종료 30일 뒤 파일만 지웁니다.
+- 콘솔: `GET /api/console/sessions/{id}/participants/{pid}/env-scan`(목록), `GET /api/console/sessions/{id}/env-scan/{photoId}/image`(사진). 감독관도 볼 수 있습니다.
+- 방 스캔(`ROOM`)에서 사람·휴대폰·책·화면이 잡혀도 응시를 막지 않고 점검 결과에 경고로만 남습니다. 감독관이 콘솔의 "환경 점검 사진"("확인 필요" 표시)에서 확인하고 치우도록 안내합니다. 책상 위(`DESK`)에서 응시자가 "휴대폰이 아니다"라고 확인하고 진행한 경우도 경고로 남고 이 사진을 감독관이 확인합니다.
+
 ### 1-7. `POST /api/entry/{invite}/proctor-events` 감독 이벤트 1건
 ```json
 {
@@ -144,7 +161,7 @@ PC  ◀── paired {pairCode, phoneUrl} ──  서버   (PC 는 phoneUrl 을 
 | `hello-phone` | 폰 | `{ pairCode }` | 짝 확인. 틀리면 `error` 후 종료 |
 | `violation` | 폰 | `{ violation: { id, kind, type, message, startedAt, ts, durationMs, detail?, snapshot? } }` (시각은 epoch ms) | **1-7 로 저장** (`source=PHONE_CAM`, 응시자가 시작한 뒤만). 사진을 뺀 내용을 PC 로 전달 |
 | `phone-status` | 폰 | `{ status: { fps, handCount, objects[], calibrated, bytesSent } }` 1초마다 | 마지막 수신 시각 갱신, PC 로 전달 |
-| `scan-frame` | 폰 | `{ stage: "room"\|"desk", image: "data:image/jpeg;base64,...", objects[] }` | **저장하지 않고** PC 로 전달 (PC 가 정밀 분석) |
+| `scan-frame` | 폰 | `{ stage: "room"\|"desk"\|"ear-left"\|"ear-right"\|"wrist", image: "data:image/jpeg;base64,...", objects[], angle? }` | PC 로 전달. `room`·`desk` 는 릴레이가 §1-8 로 파일 서버에도 올림(귀·손목은 올리지 않음). `angle` 은 방 스캔에서 찍은 방향(0~359도) |
 | `check-report` | 폰 | `{ report: { passed, items[] } }` | PC 로 전달 (PC 가 1-3 에 함께 저장) |
 
 ### 2-3. 서버 → 클라이언트
@@ -186,6 +203,7 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | GET | `/api/console/sessions` | 내 회사 회차 목록 + 인원 집계·미확인 이벤트 수(`unreviewedEvents`). 관리자는 `?companyId=` 로 좁히고 없으면 전체 (취소한 회차는 `phase=CANCELED`, `canceledAt`) |
 | POST | `/api/console/sessions` | 회차 생성 `{companyId, title, startsAt, endsAt, proctoring, taskIds[]}` |
 | GET·PUT | `/api/console/sessions/{id}` | 상세 · 수정(시작 전만, 시간·과제·이름이 바뀌면 대상자에게 변경 안내 메일) |
+| POST | `/api/console/sessions/{id}/rescue` | 종료된 회차에서 채점 단계에 가지 못한 응시(풀이 중·후속 질문 단계)를 다시 채점으로 넘김. 관리자·매니저만, 종료된 회차만. `{pending, failed}` 를 돌려줌. 이미 채점 단계인 응시는 건드리지 않아 여러 번 불러도 안전. 채점에 AI 호출 비용이 듦 |
 | POST | `/api/console/sessions/{id}/cancel` | 취소(시작 전만). **지우지 않고** `canceled_at` 을 남기고 대상자에게 취소 안내 메일 |
 | POST | `/api/console/sessions/{id}/participants` | 대상자 추가 `{participants:[{name,email}]}` → `{added, rejected:[{line,name,email,reason}]}` |
 | POST | `/api/console/sessions/{id}/participants/csv?dryRun=` | 대상자 CSV(.csv, 2MB, 최대 1,000명) 업로드. 첫 행 `이름,이메일`. UTF-8(BOM 가능)·MS949 모두 읽음. `dryRun=true` 면 저장 없이 미리 보기(`added` = 등록될 인원). 저장하면 원본을 `participant-csv/{회차}/{업로드 ms}.csv` 에 보관(`participants_csv_key`). 틀린 행 하나 때문에 전체를 거절하지 않음 |
@@ -217,6 +235,8 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 |---|---|
 | 동시 시작 | 시작 가능 여부는 서버 시각으로만. 프론트 시계는 믿지 않는다 |
 | 자동 제출 | 2초 주기 스케줄러가 `ends_at ≤ 지금` 이고 안 닫힌 회차를 찾아, 시작했고 미제출인 응시자를 전원 제출(`submit_kind=AUTO`). 회차마다 트랜잭션 분리, 두 번 돌아도 안전. 서버가 여러 대면 ShedLock 필요 |
+| 종료 시 마무리 | 직접 제출해 후속 질문 단계에 있던 응시도 포함해, 시작한 응시자의 응시를 끝까지 넘긴다: 풀이 중이면 제출하고, 후속 질문 단계면 **빈 답으로 마무리해 채점 큐에 올린다**(안 하면 채점이 시작되지 않음). 이미 채점 단계인 응시는 건드리지 않는다 |
+| 마무리 실패 재시도 | 채점으로 못 넘긴 응시가 있으면 회차를 닫지 않고 2초, 4초, 8초, 16초(최대 30초) 간격으로 다시 시도한다. 5번 실패하면 포기하고 닫으며 오류 로그를 남긴다. 재시도 상태는 서버 메모리에만 있다. 포기한 응시는 콘솔의 `rescue` 로 다시 넘긴다 |
 | 지연 지표 | `closed_at - ends_at` 을 결과 API `metrics.autoSubmitLagMs` 로 |
 | 사진 삭제 | 1시간 주기로 **회차 종료 30일**이 지난 사진 삭제 (`pair.exam.snapshot-retention-days`). S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at` 은 남길 것) |
 | 초대 메일 | 대상자 등록·다시 보내기 트랜잭션 **커밋 뒤** 비동기 발송. 토큰 원문은 메모리 이벤트로만 메일러에 넘긴다. 결과는 `invite_status` (PENDING/SENT/FAILED). 결과 기록은 두 컬럼만 바꾸는 UPDATE 로 한다 (그 사이 응시자가 시작한 기록을 덮어쓰지 않게) |
