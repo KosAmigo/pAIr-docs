@@ -15,7 +15,7 @@ pAIr(AI 활용 역량 진단 플랫폼) 기획·설계·평가·API 문서. 코�
 | `설계/` | ERD(영문).png, ERD(한글).png | 데이터 모델 그림 (테이블 39개) |
 | | erd/pair_schema.sql, erd/테이블_정의서.md | ERD 원본 DDL(PostgreSQL)과 테이블 설명 |
 | | erd/sample/ | 샘플 데이터 생성·적재·검증 스크립트와 CSV |
-| | system-architecture.png / .html | 시스템 아키텍처 (모듈·데이터·외부 연동) |
+| | 아키텍처/ | 전체 시스템 · AI 서비스 · 인프라 및 배포 아키텍처 (PNG, HTML 원본, 로고, render.sh) |
 | | 시스템구성도.png | 시스템 구성도 (기술 스택·주요 흐름) |
 | | 시스템구성도_소스/ | 구성도 HTML 원본과 로고 (pAIr-front 에 있던 이전 판, png 도 이전 판) |
 | | 화면설계서/ | 주요 화면 8개 화면설계서 (PDF, HTML, 페이지별 PNG, 원본 캡처 img/) |
