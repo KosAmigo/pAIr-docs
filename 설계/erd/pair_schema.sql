@@ -46,6 +46,21 @@ COMMENT ON COLUMN users.company_id IS '소속 회사 ID(MANAGER·PROCTOR만)';
 COMMENT ON COLUMN users.created_at IS '가입 시각';
 COMMENT ON COLUMN users.deleted_at IS '탈퇴 시각(탈퇴하면 이메일·이름을 익명값으로 바꾸고 기록은 남김)';
 
+-- 로그인 세션(Flyway V4). 토큰 원문이 아니라 해시와 만료 시각만 저장한다.
+CREATE TABLE auth_sessions (
+    token_hash  VARCHAR(64)  PRIMARY KEY,
+    user_id     BIGINT       NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ  NOT NULL,
+    CHECK (expires_at > created_at)
+);
+CREATE INDEX idx_auth_sessions_expires_at ON auth_sessions (expires_at);
+COMMENT ON TABLE  auth_sessions IS '로그인 세션';
+COMMENT ON COLUMN auth_sessions.token_hash IS '세션 토큰 해시(SHA-256, 원문은 저장하지 않음)';
+COMMENT ON COLUMN auth_sessions.user_id IS '회원 ID';
+COMMENT ON COLUMN auth_sessions.created_at IS '로그인 시각';
+COMMENT ON COLUMN auth_sessions.expires_at IS '만료 시각';
+
 CREATE TABLE company_inquiries (
     inquiry_id     BIGSERIAL    PRIMARY KEY,
     company_name   VARCHAR(100) NOT NULL,
