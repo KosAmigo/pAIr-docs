@@ -773,6 +773,8 @@ CREATE TABLE exam_participants (
     invited_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     reminded_at     TIMESTAMPTZ,
     entered_at      TIMESTAMPTZ,
+    last_seen_at    TIMESTAMPTZ,
+    link_expired_at TIMESTAMPTZ,
     UNIQUE (session_id, email)
 );
 COMMENT ON TABLE  exam_participants IS '회차 응시 대상자';
@@ -786,6 +788,8 @@ COMMENT ON COLUMN exam_participants.invite_error IS '초대 메일 실패 사유
 COMMENT ON COLUMN exam_participants.invited_at IS '초대 메일 발송 시각(다시 보내면 갱신)';
 COMMENT ON COLUMN exam_participants.reminded_at IS '시작 하루 전 알림 메일 발송 시각';
 COMMENT ON COLUMN exam_participants.entered_at IS '입장 시각';
+COMMENT ON COLUMN exam_participants.last_seen_at IS '시험 화면이 마지막으로 연결을 알려 온 시각(시작 후)';
+COMMENT ON COLUMN exam_participants.link_expired_at IS '유예 시간(5분) 안에 돌아오지 않아 입장 링크가 만료된 시각(비어 있으면 유효)';
 
 ALTER TABLE attempts
     ADD CONSTRAINT fk_attempts_participant
@@ -803,7 +807,7 @@ COMMENT ON COLUMN proctor_consents.consent_version IS '동의서 버전';
 COMMENT ON COLUMN proctor_consents.env_check IS '환경 점검 결과(카메라, 브라우저, 전체화면)';
 COMMENT ON COLUMN proctor_consents.consented_at IS '동의 시각';
 
--- 감독 이벤트 종류(기준 데이터). 감지 종류가 늘면 행만 추가한다. 코드 이름은 docs/api/실전시험_감독_API.md 와 같다.
+-- 감독 이벤트 종류(기준 데이터). 감지 종류가 늘면 행만 추가한다. 코드 이름은 pAIr-docs/API/실전시험_감독_API.md 와 같다.
 CREATE TABLE proctor_event_types (
     code      VARCHAR(20)  PRIMARY KEY,
     source    VARCHAR(10)  NOT NULL CHECK (source IN ('BROWSER', 'PC_CAM', 'PHONE_CAM')),
@@ -835,7 +839,9 @@ INSERT INTO proctor_event_types (code, source, label, severity) VALUES
     ('PHONE',              'PHONE_CAM', '휴대폰이 감지되었습니다',               'HIGH'),
     ('EXTRA_SCREEN',       'PHONE_CAM', '다른 화면(모니터·노트북)이 감지되었습니다', 'HIGH'),
     ('BOOK',               'PHONE_CAM', '책·자료가 감지되었습니다',              'MEDIUM'),
-    ('PHONE_DISCONNECTED', 'PHONE_CAM', '휴대폰 캠 연결이 끊겼습니다',            'MEDIUM');
+    ('PHONE_DISCONNECTED', 'PHONE_CAM', '휴대폰 캠 연결이 끊겼습니다',            'MEDIUM'),
+    ('CONNECTION_LOST',    'BROWSER',   '시험 화면 연결이 끊겼다가 돌아왔습니다',      'MEDIUM'),
+    ('LINK_EXPIRED',       'BROWSER',   '유예 시간 안에 돌아오지 않아 입장 링크가 만료되었습니다', 'HIGH');
 
 -- 감독은 과제가 아니라 대상자 단위로 회차 내내 돈다(동의도 대상자 단위). 그래서 대상자에 붙이고,
 -- 과제 화면에서 생긴 이벤트만 그 응시를 함께 남긴다(과제 목록 화면 등에서는 응시가 없다).
@@ -877,6 +883,29 @@ COMMENT ON COLUMN proctor_events.review IS '담당자 판단(OK 문제 없음/SU
 COMMENT ON COLUMN proctor_events.review_note IS '판단 메모';
 COMMENT ON COLUMN proctor_events.reviewed_by IS '판단한 회원 ID(같은 회사 PROCTOR·MANAGER 또는 관리자)';
 COMMENT ON COLUMN proctor_events.reviewed_at IS '판단 시각';
+
+-- 환경 점검 사진: 시험 전 책상 위(DESK) 점검 사진(과거 방 360도 ROOM 은 호환용). 감독 이벤트와 따로 둔다:
+-- 시험 중 경고가 아니라 시험 전 점검 기록이라 이벤트 목록·통계에 섞이지 않는다. 파일은 감독 사진과 같은 저장소·보관 기간.
+CREATE TABLE env_scan_photos (
+    env_scan_photo_id  BIGSERIAL    PRIMARY KEY,
+    participant_id     BIGINT       NOT NULL REFERENCES exam_participants (participant_id) ON DELETE CASCADE,
+    stage              VARCHAR(10)  NOT NULL CHECK (stage IN ('ROOM', 'DESK')),
+    angle_deg          SMALLINT     CHECK (angle_deg BETWEEN 0 AND 359),
+    objects            VARCHAR(400),
+    phone_suspect      BOOLEAN      NOT NULL DEFAULT FALSE,
+    storage_key        VARCHAR(255),
+    size_bytes         INT          NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+    captured_at        TIMESTAMPTZ  NOT NULL,
+    deleted_at         TIMESTAMPTZ
+);
+CREATE INDEX idx_env_scan_photos_participant ON env_scan_photos (participant_id, env_scan_photo_id);
+COMMENT ON TABLE  env_scan_photos IS '환경 점검 사진(책상 위, 과거 방 360도)';
+COMMENT ON COLUMN env_scan_photos.stage IS '단계(ROOM 방 360도, DESK 책상 위)';
+COMMENT ON COLUMN env_scan_photos.angle_deg IS '방 스캔에서 이 사진을 찍은 방향(0~359도, 책상은 비움)';
+COMMENT ON COLUMN env_scan_photos.objects IS '사진에서 감지한 물체 이름(쉼표로 구분)';
+COMMENT ON COLUMN env_scan_photos.phone_suspect IS '휴대폰으로 감지된 장면인지(감독관이 먼저 확인할 수 있게 표시)';
+COMMENT ON COLUMN env_scan_photos.storage_key IS '파일 저장소 키(보관 기간 뒤에도 남겨 두고 deleted_at 으로 지웠음을 표시)';
+COMMENT ON COLUMN env_scan_photos.deleted_at IS '보관 기간이 지나 파일을 지운 시각';
 
 -- ───────── 7. 조회용 인덱스 ─────────
 -- PostgreSQL 은 외래 키에 인덱스를 자동으로 만들지 않는다. 자주 따라가는 외래 키에만 건다.
