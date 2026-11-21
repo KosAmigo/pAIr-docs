@@ -78,9 +78,14 @@ AI는 지금 응시자가 질문에 직접 붙여 넣은 글만 봅니다. 이 A
 
 검증이 실패하면 AI를 부르지 않고 크레딧도 차감하지 않습니다.
 
-## 2. 첨부 원문 보기 (선택, 복기·검토용)
+## 2. 첨부 원문 보기 (복기 화면)
 
-`GET /api/attempts/{id}/attachments/{attachmentId}` → `{ "path": …, "pages": …, "sentText": "…" }`. 응시 주인만 볼 수 있고(기존 소유자 검사), 복기 화면에서 "그때 AI에게 보여 준 내용"을 펼쳐 볼 때 씁니다. 1차 구현에서는 빼도 됩니다.
+`GET /api/attempts/{id}/attachments/{attachmentId}` → `{ "id", "source", "path", "pages", "chars", "sentText" }`.
+
+- `sentText`는 그 질문을 보낼 때 AI에게 실제로 보낸 글자입니다. 그 뒤에 파일을 고쳤어도 바뀌지 않습니다.
+- 응시 주인만 볼 수 있습니다(`AttemptOwnerInterceptor`). 다른 응시의 첨부 ID는 404(있는지도 알려 주지 않음)입니다.
+- 복기 화면(대화 서랍, 두 풀이 대화 비교)은 `GET /api/attempts/{id}/report`의 `report.transcript`를 읽습니다. 이 사본은 채점 때 저장한 것이라 첨부가 없어서, **리포트를 돌려줄 때** 질문 턴마다 `attachments`(id, source, path, pages, chars)를 얹습니다. 저장된 리포트는 바꾸지 않습니다.
+- 화면: 질문 턴의 첨부 칩을 누르면 원문 창이 열립니다(`AttachmentModal`). Esc는 원문 창만 닫습니다.
 
 ## 3. 롤백과 복기
 
@@ -129,5 +134,4 @@ AI는 지금 응시자가 질문에 직접 붙여 넣은 글만 봅니다. 이 A
 ## 남은 일
 
 - 끌기·놓기를 실제 브라우저에서 사람이 한 번 해 보기(터치 기기는 클립 버튼만 됩니다).
-- 복기 화면에서 "그때 AI에게 보여 준 내용" 원문 보기(위 2번 API)는 아직 만들지 않았습니다.
 - 응시 화면 PDF 뷰어는 브라우저 기본 뷰어(iframe)입니다. 쪽 이동은 그 뷰어가 합니다.
