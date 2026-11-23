@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE companies (
     company_id   BIGSERIAL    PRIMARY KEY,
     name         VARCHAR(100) NOT NULL,
-    business_no  VARCHAR(20)  UNIQUE,
+    business_no  VARCHAR(20),
     contact      VARCHAR(50),
     employee_list_path  VARCHAR(255),
     created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
@@ -30,6 +30,9 @@ CREATE TABLE users (
     member_status  VARCHAR(20)  NOT NULL DEFAULT 'PENDING' CHECK (member_status IN ('ACTIVE', 'WITHDRAWN', 'PENDING')),
     role           VARCHAR(10)  NOT NULL DEFAULT 'USER' CHECK (role IN ('USER', 'MANAGER', 'PROCTOR', 'ADMIN')),
     company_id     BIGINT       REFERENCES companies (company_id),
+    email_verified BOOLEAN      NOT NULL DEFAULT TRUE,
+    password_change_required BOOLEAN NOT NULL DEFAULT FALSE,
+    onboarding_mail_status VARCHAR(10) NOT NULL DEFAULT 'SENT' CHECK (onboarding_mail_status IN ('PENDING', 'SENT', 'FAILED')),
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
     deleted_at     TIMESTAMPTZ,
     CHECK ((role IN ('MANAGER', 'PROCTOR')) = (company_id IS NOT NULL)),
@@ -43,8 +46,15 @@ COMMENT ON COLUMN users.name IS '이름';
 COMMENT ON COLUMN users.member_status IS '회원 상태(PENDING 이메일 인증 전(기본값)/ACTIVE 정상/WITHDRAWN 탈퇴). 초대 링크로 만든 기업 계정처럼 인증이 필요 없으면 서비스 코드가 ACTIVE로 넣는다';
 COMMENT ON COLUMN users.role IS '권한(USER 응시자/MANAGER 기업 매니저/PROCTOR 기업 감독관/ADMIN 관리자)';
 COMMENT ON COLUMN users.company_id IS '소속 회사 ID(MANAGER·PROCTOR만)';
+COMMENT ON COLUMN users.email_verified IS '이메일 인증 완료 여부';
+COMMENT ON COLUMN users.password_change_required IS '임시 비밀번호 변경 필요 여부';
+COMMENT ON COLUMN users.onboarding_mail_status IS '기업 온보딩 메일 발송 상태(PENDING/SENT/FAILED)';
 COMMENT ON COLUMN users.created_at IS '가입 시각';
 COMMENT ON COLUMN users.deleted_at IS '탈퇴 시각(탈퇴하면 이메일·이름을 익명값으로 바꾸고 기록은 남김)';
+
+CREATE UNIQUE INDEX uq_users_active_company_manager
+    ON users (company_id)
+    WHERE role = 'MANAGER' AND member_status = 'ACTIVE';
 
 -- 로그인 세션(Flyway V4). 토큰 원문이 아니라 해시와 만료 시각만 저장한다.
 CREATE TABLE auth_sessions (
@@ -60,6 +70,18 @@ COMMENT ON COLUMN auth_sessions.token_hash IS '세션 토큰 해시(SHA-256, 원
 COMMENT ON COLUMN auth_sessions.user_id IS '회원 ID';
 COMMENT ON COLUMN auth_sessions.created_at IS '로그인 시각';
 COMMENT ON COLUMN auth_sessions.expires_at IS '만료 시각';
+
+CREATE TABLE email_verifications (
+    email VARCHAR(255) PRIMARY KEY,
+    code_hash VARCHAR(60) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ,
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+    consumed_at TIMESTAMPTZ,
+    CHECK (expires_at IS NULL OR expires_at > created_at)
+);
+COMMENT ON TABLE email_verifications IS '회원 이메일 인증 코드와 시도 상태';
+COMMENT ON COLUMN email_verifications.expires_at IS '일반 가입 코드는 만료 시각을 두며 기업 온보딩 코드는 NULL(무기한)';
 
 CREATE TABLE company_inquiries (
     inquiry_id     BIGSERIAL    PRIMARY KEY,
@@ -90,6 +112,17 @@ COMMENT ON COLUMN company_inquiries.handled_by IS '처리한 관리자 회원 ID
 COMMENT ON COLUMN company_inquiries.handled_at IS '처리 시각';
 COMMENT ON COLUMN company_inquiries.created_at IS '문의 시각';
 
+CREATE TABLE company_inquiry_members (
+    inquiry_member_id BIGSERIAL PRIMARY KEY,
+    inquiry_id BIGINT NOT NULL REFERENCES company_inquiries (inquiry_id) ON DELETE CASCADE,
+    name VARCHAR(50) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    role VARCHAR(10) NOT NULL CHECK (role IN ('MANAGER', 'PROCTOR')),
+    UNIQUE (inquiry_id, email)
+);
+CREATE INDEX idx_company_inquiry_members_inquiry ON company_inquiry_members (inquiry_id);
+COMMENT ON TABLE company_inquiry_members IS '기업 도입 문의의 CSV 회원 명단';
+
 CREATE TABLE company_invites (
     invite_id         BIGSERIAL    PRIMARY KEY,
     company_id        BIGINT       NOT NULL REFERENCES companies (company_id),
@@ -100,6 +133,7 @@ CREATE TABLE company_invites (
     expires_at        TIMESTAMPTZ  NOT NULL,
     accepted_user_id  BIGINT       UNIQUE REFERENCES users (user_id),
     accepted_at       TIMESTAMPTZ,
+    revoked_at        TIMESTAMPTZ,
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CHECK (expires_at > created_at),
     CHECK ((accepted_user_id IS NULL) = (accepted_at IS NULL))
@@ -110,11 +144,28 @@ COMMENT ON COLUMN company_invites.company_id IS '회사 ID';
 COMMENT ON COLUMN company_invites.email IS '초대 이메일';
 COMMENT ON COLUMN company_invites.role IS '초대 권한(MANAGER/PROCTOR)';
 COMMENT ON COLUMN company_invites.token_hash IS '초대 링크 토큰 해시(SHA-256)';
-COMMENT ON COLUMN company_invites.invited_by IS '초대한 회원 ID(관리자, 또는 감독관을 초대하는 같은 회사 매니저)';
+COMMENT ON COLUMN company_invites.invited_by IS '초대한 회원 ID(같은 회사의 감독관을 초대한 매니저)';
 COMMENT ON COLUMN company_invites.expires_at IS '만료 시각';
 COMMENT ON COLUMN company_invites.accepted_user_id IS '가입한 담당자 회원 ID';
 COMMENT ON COLUMN company_invites.accepted_at IS '가입 시각';
 COMMENT ON COLUMN company_invites.created_at IS '초대 시각';
+
+CREATE UNIQUE INDEX uq_company_invites_pending_email
+    ON company_invites (lower(email))
+    WHERE accepted_at IS NULL AND revoked_at IS NULL;
+
+CREATE TABLE company_account_events (
+    event_id BIGSERIAL PRIMARY KEY,
+    company_id BIGINT NOT NULL REFERENCES companies (company_id),
+    event_type VARCHAR(30) NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users (user_id),
+    target_user_id BIGINT REFERENCES users (user_id),
+    details TEXT,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_company_account_events_company_time
+    ON company_account_events (company_id, created_at DESC);
+COMMENT ON TABLE company_account_events IS '기업 계정 주요 변경 감사 기록';
 
 CREATE TABLE credit_purchases (
     purchase_id     BIGSERIAL    PRIMARY KEY,
