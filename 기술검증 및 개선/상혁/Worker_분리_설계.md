@@ -1,6 +1,8 @@
-# 카메라 분석 Web Worker 분리 설계 (설계안 · 구현 전)
+# 카메라 분석 Web Worker 분리 설계 (1·2단계 구현됨 · 3단계 이후 설계)
 
-> 상태: 제안. 코드는 아직 바꾸지 않았다. 근거 수치는 `pAIr-front/frontend/tools/lowspec-bench` 하네스 실측.
+> 상태(2026-11-23): **1단계(감독 루프)·2단계(환경 점검)와 11장 성능 자가 측정은 구현됨** (프론트 브랜치 `feat/11-23jusang`, **main 미merge**, 실제 카메라 검증 전). 3단계(휴대폰·책상 스캔 Worker)는 아직 설계만이다. 이 문서 13장의 휴대폰 JPEG 실측은 [휴대폰 프레임 중계·증거 구간·보관 연장](../../docs/intent/이벤트-증거구간-검토-보관연장.md)(구현 전) 의 근거다. 근거 수치는 `pAIr-front/frontend/tools/lowspec-bench` 하네스 실측.
+>
+> **후속 방향(2026-11-23 확정, 설계만):** 3단계는 휴대폰 분석(손·물체·밝기, 지금 메인 스레드 `phoneAnalysis.ts`)을 **웹캠 분석 Worker 와 분리된 두 번째 Worker** 로 옮기는 것으로 정한다(한쪽 지연이 다른 쪽에 번지지 않게). 휴대폰 영상은 WebRTC 가 아니라 서버가 중계하는 JPEG 프레임으로 받는다.
 
 ## 1. 왜 하는가
 
@@ -93,7 +95,7 @@ type FromWorker =
 - **0단계 스파이크 (게이트) — 부분 통과, 결과는 10장**: Vite 모듈 Worker에서 `@mediapipe/tasks-vision` 로딩(wasm 로더가 Worker에서 동작하는지), Worker 안 GPU delegate(OffscreenCanvas), 숨은 탭에서 `createImageBitmap(video)` 동작을 확인한다. 하네스에서는 Blob 클래식 Worker + `vision_bundle.cjs` 방식이 동작함을 확인했지만 Vite 번들 경로는 별개라서 확인이 필요하다. 실패하면 클래식 Worker 빌드나 하네스 방식으로 방향을 바꾼다.
 - **1단계 감독 루프 — 구현됨(2026-11-23), 실사용 검증 전**: 인터페이스·두 백엔드, `frameLoop` 비동기 확장, `camHub` 전환. 단위 테스트(tests/proctor/visionBackend, frameLoop)와 빌드 통과. 실제 카메라로 감독 전체 흐름은 아직 확인하지 않았다. 주소 끝에 `&vision=main` 또는 `&vision=worker`로 방식을 고정해 비교할 수 있다. 환경 점검(2단계)이 아직 메인 모델을 쓰기 때문에, 그동안 메인에도 모델이 올라가 있다(메모리 이중 사용, 2단계에서 해소).
 - **2단계 환경 점검 — 구현됨(2026-11-23), 실사용 검증 전**: `EnvCheckPanel`이 `camHub.visionBackend().analyzeEnv(...)`를 쓰고 `camHub.models()`는 제거했다. 백엔드에 `analyzeEnv`·`resetEnv`를 추가했고(요약값 `EnvFrameInfo`: 얼굴 수·상자·고개 좌우·어깨 보임·손 수), 손 모델은 Worker 안에서 손목 단계에서 처음 필요할 때 불러온다(개발 서버 측정: 첫 요청 약 540ms, 이후 약 28ms). **메인 스레드에는 모델이 올라가지 않는다**: `MainBackend`가 처음 쓰일 때(Worker 꺼짐·실패)에만 메인 모델을 불러온다(1단계 리뷰 M4 해소). 분석이 연달아 3번 실패하면 그 점검 단계는 실패(시간 초과와 같은 처리)로 끝낸다.
-- **3단계 휴대폰·책상 스캔**: 손/물체 모델과 밝기 계산(`getImageData`)을 Worker(OffscreenCanvas)로. 휴대폰 캠이 켜질 때 진행.
+- **3단계 휴대폰·책상 스캔 (설계만)**: 손/물체 모델과 밝기 계산(`getImageData`)을 Worker(OffscreenCanvas)로. 휴대폰 캠이 켜질 때 진행. 2026-11-23 확정 방향에 따라 웹캠 Worker 와 **별도 Worker 로 둔다**. 휴대폰 분석의 PC 비용은 측정하지 않았고, 코어가 적은 PC 에서 Worker 둘이 동시에 돌 때는 구현 뒤 `lowspec-bench` 로 다시 잰다.
 - **4단계 검증**: 하네스와 실기기 측정, 회귀 테스트(아래).
 
 ## 6. 실패 처리 · 폴백
