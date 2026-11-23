@@ -159,7 +159,7 @@
 
 ## 2. 휴대폰 보조 캠 릴레이 (WebSocket `/ws/proctor`)
 
-> **현재 상태(2026-11-21):** 프론트 스위치(`proctor/features.ts` 의 `PHONE_CAM_ENABLED`·`SCREEN_SHARE_ENABLED`)가 둘 다 `false` 라서 응시 흐름은 웹캠만 쓴다. 이 절의 릴레이와 §6-11 감독관 영상(휴대폰·화면 채널)은 스위치를 켰을 때의 동작이다.
+> **현재 상태(2026-11-23):** 프론트 스위치(`proctor/features.ts`)는 `PHONE_CAM_ENABLED=false`, `SCREEN_SHARE_ENABLED=true` 라서 응시 흐름은 웹캠 + PC 화면 공유를 쓴다. 화면 공유 이벤트 서버 전송은 `SCREEN_EVENTS_ACCEPTED=false` 로 아직 꺼져 있다. 이 절의 릴레이와 §6-11 의 휴대폰 채널은 `PHONE_CAM_ENABLED` 를 켰을 때의 동작이다.
 
 PC 와 휴대폰을 잇는다. **이 WebSocket 으로는 영상이 오가지 않는다.** 휴대폰 영상은 `rtc` 메시지(시그널링)로 맺은 WebRTC 연결로 PC 에 직접 가고, 서버에 저장되지 않는다 (§2-5). 메시지는 모두 JSON 문자열. 최대 2MB.
 
