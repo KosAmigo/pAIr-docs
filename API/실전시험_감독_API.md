@@ -1,6 +1,6 @@
 # 실전 시험·감독 API 명세 (프론트 ↔ 백엔드)
 
-> 작성: 팀원 4 (실전 시험 흐름) · 2026-11-19
+> 작성: 팀원 4 (실전 시험 흐름) · 2026-11-19 · 2026-11-23 현재 정책 반영 (웹캠 + 화면 공유 필수, 휴대폰 보조 캠 중단, 점검 실패여도 입장, 환경 점검 확인·안내 메시지)
 > 프론트는 이 명세대로만 부른다. 호출 코드는 pAIr-front `frontend/src/proctor/api/proctorApi.ts` 한 파일에 모여 있어서, 주소가 바뀌면 그 파일만 고치면 된다.
 > 참고 구현: pAIr-back `backend/src/main/java/com/pair/exam/` (Spring Boot, JPA, PostgreSQL). 그대로 옮겨 써도 된다.
 
@@ -18,7 +18,7 @@
 - 영상은 서버로 보내지 않는다. 카메라 분석은 응시자 브라우저 안에서만 한다.
 - 이상이 확정된 순간에만 이벤트 1건과 JPEG 사진 1장(320px, 보통 10~20KB)을 보낸다.
 - 얼굴을 식별하지 않는다(누구인지가 아니라 얼굴이 있는지만 본다).
-- 사진은 **회차 종료 30일 뒤** 지우고 `snapshot_deleted_at` 만 남긴다.
+- 사진은 **회차 종료 7일 뒤** 지우고 `snapshot_deleted_at` 만 남긴다.
 - 감독 이벤트는 자동 탈락이 아니라 담당자가 확인(OK/SUSPECT)하는 기록이다.
 
 ---
@@ -64,6 +64,7 @@
 { "consentVersion": "v1", "envCheck": { "passed": true, "items": [ ... ], "phone": { ... } } }
 ```
 - `envCheck` 는 프론트 환경 점검 결과 JSON 그대로 (최대 20,000자). 다시 점검하면 덮어쓴다
+- **점검 결과가 실패(`passed: false`)여도 그대로 저장하고 입장시킨다**(2026-11-22). 서버는 통과 여부로 입장을 막지 않으며, 실패 결과는 감독 기록에 남아 감독관이 확인한다
 - 종료·취소된 회차면 400. 응답: 1-2 와 같은 입장 정보
 
 ### 1-4. `POST /api/entry/{invite}/enter` 대기실 입장
@@ -98,11 +99,22 @@
 | `image` | JPEG 만, 감독 사진과 같은 크기 한도 |
 - 응답 `201`: `{id, participantId, stage, angle, objects[], phoneSuspect, sizeBytes, capturedAt, deleted}`. `objects` 에 `cell phone` 이 있으면 `phoneSuspect=true`.
 - 감독을 쓰지 않는 회차, 취소된 회차, 종료 5분 뒤, 대상자당 100장 초과는 거절(400). 잘못된 링크는 404.
-- 감독 이벤트(`proctor_events`)와 **따로** `env_scan_photos` 테이블에 저장해 이벤트 목록·통계에 섞이지 않습니다. 파일은 감독 사진과 같은 저장소(`env-scan/{회차}/{사진}.jpg`)에 올리고, 회차 종료 30일 뒤 파일만 지웁니다.
+- 감독 이벤트(`proctor_events`)와 **따로** `env_scan_photos` 테이블에 저장해 이벤트 목록·통계에 섞이지 않습니다. 파일은 감독 사진과 같은 저장소(`env-scan/{회차}/{사진}.jpg`)에 올리고, 회차 종료 7일 뒤 파일만 지웁니다.
 - 콘솔: `GET /api/console/sessions/{id}/participants/{pid}/env-scan`(목록), `GET /api/console/sessions/{id}/env-scan/{photoId}/image`(사진). 감독관도 볼 수 있습니다.
 - **책상 위(`DESK`) 감지는 응시를 막지 않고 경고만 합니다.** 휴대폰·책·화면(노트북·모니터)이 잡히면 응시자 화면의 점검 결과에 "책상 위에서 휴대폰 2회가 감지되었습니다. 시험에 필요 없는 물건은 치워 주세요…" 경고(`warn`)가 뜨고, 응시자는 확인 창 없이 다음 단계로 넘어갑니다. 감독관은 콘솔의 "환경 점검 사진"("확인 필요" 표시)에서 사진과 물체 목록을 보고 판단합니다. 책상에서는 응시자 본인의 손·팔이 사람으로 잡혀 오탐이 나므로 `person` 은 세지 않습니다.
 - 응시자가 점검을 다시 하면(통과하지 못한 항목만 다시 점검) 책상 스캔도 다시 하며 사진이 새로 올라갑니다. 이전 사진은 지우지 않고 감독관이 모두 볼 수 있습니다.
 - 현재 프론트는 휴대폰 보조 캠 스위치(`PHONE_CAM_ENABLED=false`)를 꺼 두어 책상 위 사진이 올라오지 않는다. 스위치를 켜면 위 규칙대로 동작한다.
+
+### 1-10. `POST /api/entry/{invite}/env-progress` 환경 점검 진행 상태
+```json
+{ "result": { ...점검 항목별 상태 JSON, 1-3 의 envCheck 와 같은 모양... } }
+```
+- 점검 화면이 **3초 간격**으로 올린다. 대상자당 최신 1건을 덮어쓴다(`env_check_progress`, 최대 20,000자). 응답 204
+- 콘솔이 점검에서 막힌 응시자를 실시간으로 보기 위한 것이다. 동의 저장 뒤의 최종 결과(`proctor_consents.env_check`)는 따로 있다
+
+### 1-11. `GET /api/entry/{invite}/notices` · `POST /api/entry/{invite}/notices/{noticeId}/read` 안내 메시지
+- GET: 콘솔이 보낸 안내 목록 `[{id, message, sentAt, readAt}]`. 입장 대기·시험 화면이 주기적으로 가져가 시험을 막지 않는 배너로 보여 준다. 응시자는 시험이 끝난 뒤에도 읽을 수 있다
+- POST `.../read`: 응시자가 "확인"을 누르면 읽음 시각을 남긴다(응답 204). 이미 읽은 메시지는 **처음 읽은 시각을 유지**한다. 다른 응시자의 안내 번호면 없는 안내로 처리한다(404)
 
 ### 1-9. `POST /api/entry/{invite}/heartbeat` 시험 화면 연결 신호
 시험 화면이 **10초마다** 보냅니다. 응답: `{ "expired": false }`.
@@ -110,7 +122,7 @@
 - 신호가 **90초 넘게** 끊겼다 돌아오면 감독 이벤트 `CONNECTION_LOST`(끊긴 초를 `detail.gapSeconds` 에)를 남깁니다.
 - 마지막 신호 뒤 **5분(유예)** 안에 돌아오지 못하면 입장 링크를 만료시키고 `LINK_EXPIRED` 를 남깁니다. 이때 응답은 `expired: true`, 입장 정보의 `linkExpired` 도 `true` 입니다. 재입장(`enter`) 때도 같은 규칙으로 막습니다.
 - 돌아오지 않는 경우도 30초 주기 점검(`ConnectionGrace.expireAbsent`)이 만료와 `LINK_EXPIRED` 를 남깁니다. 두 이벤트는 자동 탈락이 아니라 담당자가 보는 기록입니다.
-- 프론트의 연결 필수 규칙(웹캠·휴대폰·PC 화면 공유 15초 유예, 응시 화면 차단)은 서버와 별개로 응시자 화면에서 동작합니다 (명세서 §5.10).
+- 프론트의 연결 필수 규칙(현재 웹캠·PC 화면 공유 15초 유예, 휴대폰은 스위치를 켠 때만, 응시 화면 차단)은 서버와 별개로 응시자 화면에서 동작합니다 (명세서 §5.10).
 
 ### 1-7. `POST /api/entry/{invite}/proctor-events` 감독 이벤트 1건
 ```json
@@ -136,7 +148,7 @@
 | `snapshot` | 선택, JPEG data URL 또는 base64. **카메라 이벤트만**, 최대 200KB, JPEG 매직(FF D8 FF) 확인 |
 
 - 시작하지 않은 응시자, 감독 없는 회차, 종료 30분이 지난 뒤의 요청은 400 (연결이 끊겼던 브라우저가 몰아서 보내는 이벤트를 위해 종료 뒤 30분까지 받는다)
-- 사진은 S3 `exam-snapshots/{회차ID}/{이벤트ID}.jpg` (SSE-S3, 비공개 버킷, 회차 종료 30일 뒤 삭제). 키에 이벤트 번호가 들어 있어 이벤트와 사진이 항상 짝이 된다
+- 사진은 S3 `exam-snapshots/{회차ID}/{이벤트ID}.jpg` (SSE-S3, 비공개 버킷, 회차 종료 7일 뒤 삭제). 키에 이벤트 번호가 들어 있어 이벤트와 사진이 항상 짝이 된다
 - **저장은 세 단계로 나눈다**(작은 서버·적은 DB 연결에서도 버티게): ① 짧은 트랜잭션으로 이벤트 저장·커밋 ② 트랜잭션 밖에서 사진 업로드 ③ 이벤트에 사진 위치만 UPDATE. 업로드 중에 DB 연결을 쥐지 않는다
 - **업로드가 실패하면 5xx 로 응답**하고, 프론트 아웃박스가 같은 `clientId` 로 다시 보낸다 (네트워크 오류·5xx 만 재시도, 4xx 는 버림). 다시 온 요청은 이미 저장된 이벤트를 찾아 **이벤트를 또 만들지 않고 사진만 올려 같은 이벤트에 연결**한다. `clientId` 가 없는 옛 클라이언트는 업로드 실패 시 이벤트도 되돌린다
 - 대상자 한 명에게 붙는 사진은 최대 300장이다. 넘으면 이벤트는 저장하고 사진만 받지 않는다 (저장 공간 보호)
@@ -260,6 +272,9 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | GET | `/api/console/sessions/{id}/results` | 순위·분포·역량별 평균·상하위 비교·감독 합계·지표 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/env-scan` | 대상자의 환경 점검 사진 목록 (§1-8, 감독관도 볼 수 있다) |
 | GET | `/api/console/sessions/{id}/env-scan/{photoId}/image` | 환경 점검 사진 (image/jpeg) |
+| GET | `/api/console/sessions/{id}/participants/{pid}/env-check` | 환경 점검 결과 `{source: LIVE\|SAVED, updatedAt, result}`. 진행 상태(`env_check_progress`)와 저장된 결과 중 **더 최근 것**, 둘 다 없으면 204. 감독관도 볼 수 있다 |
+| POST | `/api/console/sessions/{id}/participants/{pid}/notices` | 응시자에게 안내 메시지 `{message}`(최대 500자, 일방향). 시험 전·중에만, **취소·종료된 회차는 400**. 감독관도 보낼 수 있다 |
+| GET | `/api/console/sessions/{id}/participants/{pid}/notices` | 보낸 안내와 읽음 여부 `[{id, message, sentAt, readAt}]` |
 | GET | `/api/console/sessions/{id}/results.csv` | CSV (UTF-8 BOM, 수식 주입 방지) |
 | GET | `/api/console/sessions/{id}/results.xlsx` | 엑셀 결과 (관리자·매니저) |
 
@@ -287,7 +302,7 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | 종료 시 마무리 | 직접 제출해 후속 질문 단계에 있던 응시도 포함해, 시작한 응시자의 응시를 끝까지 넘긴다: 풀이 중이면 제출하고, 후속 질문 단계면 **빈 답으로 마무리해 채점 큐에 올린다**(안 하면 채점이 시작되지 않음). 이미 채점 단계인 응시는 건드리지 않는다 |
 | 마무리 실패 재시도 | 채점으로 못 넘긴 응시가 있으면 회차를 닫지 않고 2초, 4초, 8초, 16초(최대 30초) 간격으로 다시 시도한다. 5번 실패하면 포기하고 닫으며 오류 로그를 남긴다. 재시도 상태는 서버 메모리에만 있다. 포기한 응시는 콘솔의 `rescue` 로 다시 넘긴다 |
 | 지연 지표 | `closed_at - ends_at` 을 결과 API `metrics.autoSubmitLagMs` 로 |
-| 사진 삭제 | 1시간 주기로 **회차 종료 30일**이 지난 감독 사진과 환경 점검 사진(`env_scan_photos`)을 삭제 (`pair.exam.snapshot-retention-days`). S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at`·`deleted_at` 은 남길 것) |
+| 사진 삭제 | 1시간 주기로 **회차 종료 7일**이 지난 감독 사진과 환경 점검 사진(`env_scan_photos`)을 삭제 (`pair.exam.snapshot-retention-days`, 코드 기본값·`application.yml` 은 아직 30 이라 7 로 바꿔야 한다). S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at`·`deleted_at` 은 남길 것) |
 | 연결 유예 | 시작한 응시자의 시험 화면이 10초마다 `heartbeat`(§1-9)를 보낸다. 90초 넘게 끊겼다 돌아오면 `CONNECTION_LOST`, 마지막 신호 뒤 5분 안에 못 돌아오면 링크 만료와 `LINK_EXPIRED`. 30초 주기 점검이 돌아오지 않는 응시자도 만료시킨다 (이미 다 제출한 응시자는 제외) |
 | 초대 메일 | 대상자 등록·다시 보내기 트랜잭션 **커밋 뒤** 비동기 발송. 토큰 원문은 메모리 이벤트로만 메일러에 넘긴다. 결과는 `invite_status` (PENDING/SENT/FAILED). 결과 기록은 두 컬럼만 바꾸는 UPDATE 로 한다 (그 사이 응시자가 시작한 기록을 덮어쓰지 않게) |
 | 하루 전 알림 | 5분 주기로 시작 24시간 안에 든 회차의 대상자에게 1번 (`reminded_at`). 초대 메일을 받은(SENT) 사람만, 시작 24시간 안에 초대된 사람은 건너뜀. 토큰 원문이 없으므로 링크 대신 "초대 메일의 링크" 안내 |
@@ -298,7 +313,7 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 ## 5. 테이블
 
 pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ERD 기준 전체), `V2__erd_changes.sql`(초대 상태·`closed_at`·사진 크기·`received_at`), `V11__connection_grace.sql`(연결 유예), `V14__env_scan_photos.sql`(환경 점검 사진) 참고:
-`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`(+`last_seen_at`, `link_expired_at`), `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`(코드표, `CONNECTION_LOST`·`LINK_EXPIRED` 포함), `env_scan_photos`
+`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`(+`last_seen_at`, `link_expired_at`), `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`(코드표, `CONNECTION_LOST`·`LINK_EXPIRED` 포함), `env_scan_photos`, `env_check_progress`(`V19__env_check_notices.sql`), `proctor_notices`
 
 > 예전의 `participant_attempts`·`task_publications` 는 없어졌다. 응시(attempts)와 과제가 DB 로 옮겨져 `attempts.participant_id` 로 대상자와 응시를 잇는다. 시작·제출 시각은 응시에서 계산한다(`ParticipantProgress`).
 
@@ -306,7 +321,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 
 ## 6. 제안(미구현): 영상 이벤트 서버 재확인
 
-> **상태: 제안 (2026-11-21 확인).** 백엔드는 아직 구현하지 않았다. `server_check` 컬럼·재확인 큐·콘솔 응답 필드 모두 없다. 프론트(콘솔 배지, `proctor/core/serverCheck.ts`)는 필드가 없어도 정상 동작하므로 백엔드가 준비되는 대로 켜면 된다. 근거: pAIr-front `docs/intent/proctor-client-analysis.md`, `docs/plan/proctor-client-analysis-plan.md` 4단계.
+> **상태: 제안 (2026-11-21 확인).** 백엔드는 아직 구현하지 않았다. `server_check` 컬럼·재확인 큐·콘솔 응답 필드 모두 없다. 프론트(콘솔 배지, `proctor/core/serverCheck.ts`)는 필드가 없어도 정상 동작하므로 백엔드가 준비되는 대로 켜면 된다. 근거: [기술검증 및 개선/상혁/intent/proctor-client-analysis.md](../기술검증%20및%20개선/상혁/intent/proctor-client-analysis.md) (4단계).
 
 ### 6-1. 배경과 확정 사항
 - 분석은 응시자 PC가 한다(웹캠·휴대폰 영상 모두). 영상 속 이벤트(PC_CAM·PHONE_CAM)는 PC가 감지하면 **사진 1장**을 §1-7 로 보낸다. 서버는 그 사진을 모델로 한 번 더 확인해 결과를 이벤트에 붙인다.
@@ -410,7 +425,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 7. 정확도: 실제 휴대폰·책·두 사람 사진으로 `CONFIRMED`/`UNCONFIRMED` 비율과 오탐·미탐 확인.
 
 ### 6-11. 제안 6: 감독관 실시간 영상 시그널링 (5단계)
-> **상태: 프론트·개발 릴레이 구현 완료, 운영 백엔드 제안.** 프론트(응시자 송신 `proctor/relay/viewerSender.ts`, 감독관 시청 `proctor/watch/`·`pages/console/LiveWatch.tsx`)와 개발 릴레이 임시 구현은 끝났다 (`tests/proctor/viewer.test.ts`, `watchRelay.test.ts`). 운영 백엔드는 같은 메시지를 Spring WebSocket(`/ws/proctor`)으로 구현하면 된다. 근거: pAIr-front `docs/plan/proctor-client-analysis-plan.md` 5단계.
+> **상태: 프론트·개발 릴레이 구현 완료, 운영 백엔드 제안.** 프론트(응시자 송신 `proctor/relay/viewerSender.ts`, 감독관 시청 `proctor/watch/`·`pages/console/LiveWatch.tsx`)와 개발 릴레이 임시 구현은 끝났다 (`tests/proctor/viewer.test.ts`, `watchRelay.test.ts`). 운영 백엔드는 같은 메시지를 Spring WebSocket(`/ws/proctor`)으로 구현하면 된다. 근거: [기술검증 및 개선/상혁/intent/proctor-client-analysis.md](../기술검증%20및%20개선/상혁/intent/proctor-client-analysis.md) (5단계).
 
 **원칙 (사용자 확정)**: 감독관이 그 응시자를 **열었을 때만** 휴대폰·웹캠·화면 공유 영상을 보낸다(상시 전송 없음). 감독관은 한 명씩만 본다. WebRTC P2P 로 충분하고 SFU 는 쓰지 않는다. **영상은 서버를 지나지 않고 저장하지 않는다** (서버는 시그널링만 넘긴다). 감독관이 안 보고 있어도 이벤트 감지·기록은 응시자 PC 가 계속한다.
 

@@ -907,6 +907,30 @@ COMMENT ON COLUMN env_scan_photos.phone_suspect IS '휴대폰으로 감지된 �
 COMMENT ON COLUMN env_scan_photos.storage_key IS '파일 저장소 키(보관 기간 뒤에도 남겨 두고 deleted_at 으로 지웠음을 표시)';
 COMMENT ON COLUMN env_scan_photos.deleted_at IS '보관 기간이 지나 파일을 지운 시각';
 
+-- 환경 점검 진행 상태: 입장 대기 중 점검 화면이 3초마다 올리는 최신 상태(콘솔 실시간 확인용, 대상자당 1건 덮어쓰기).
+-- 동의와 함께 저장하는 최종 결과는 proctor_consents.env_check 에 따로 있다.
+CREATE TABLE env_check_progress (
+    participant_id  BIGINT       PRIMARY KEY REFERENCES exam_participants (participant_id) ON DELETE CASCADE,
+    result          JSONB        NOT NULL,
+    updated_at      TIMESTAMPTZ  NOT NULL
+);
+COMMENT ON TABLE  env_check_progress IS '입장 대기 중 환경 점검 진행 상태(콘솔 실시간 확인용, 대상자당 최신 1건)';
+COMMENT ON COLUMN env_check_progress.result IS '점검 항목별 상태 JSON (proctor_consents.env_check 와 같은 모양)';
+
+-- 감독 안내 메시지: 콘솔이 응시자에게 보내는 일방향 안내(응시자 답장 없음).
+CREATE TABLE proctor_notices (
+    notice_id       BIGSERIAL    PRIMARY KEY,
+    participant_id  BIGINT       NOT NULL REFERENCES exam_participants (participant_id) ON DELETE CASCADE,
+    message         VARCHAR(500) NOT NULL,
+    sent_by         BIGINT,
+    sent_at         TIMESTAMPTZ  NOT NULL,
+    read_at         TIMESTAMPTZ
+);
+CREATE INDEX idx_proctor_notices_participant ON proctor_notices (participant_id, notice_id);
+COMMENT ON TABLE  proctor_notices IS '콘솔이 응시자에게 보낸 안내 메시지(일방향, 응시자 답장 없음)';
+COMMENT ON COLUMN proctor_notices.sent_by IS '보낸 담당자 사용자 ID';
+COMMENT ON COLUMN proctor_notices.read_at IS '응시자가 확인을 누른 시각, 안 읽었으면 비움';
+
 -- ───────── 7. 조회용 인덱스 ─────────
 -- PostgreSQL 은 외래 키에 인덱스를 자동으로 만들지 않는다. 자주 따라가는 외래 키에만 건다.
 -- (UNIQUE 나 복합 PK 의 첫 컬럼인 외래 키는 그 인덱스를 함께 쓰므로 따로 만들지 않는다)
