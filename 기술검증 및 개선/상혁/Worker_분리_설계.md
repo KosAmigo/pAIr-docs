@@ -1,0 +1,229 @@
+# 카메라 분석 Web Worker 분리 설계 (설계안 · 구현 전)
+
+> 상태: 제안. 코드는 아직 바꾸지 않았다. 근거 수치는 `pAIr-front/frontend/tools/lowspec-bench` 하네스 실측.
+
+## 1. 왜 하는가
+
+현재 얼굴·포즈 분석이 메인 스레드에서 동기로 돈다(`camHub.ts` `analyze`, `detectForVideo`).
+하네스 실측(얼굴+포즈, CPU, 앱과 동일한 100ms 간격, DevTools CPU 4배 스로틀, 같은 영상):
+
+| 항목 | 메인 스레드 | Worker |
+|---|---|---|
+| 메인 스레드 막힘 | 55% (롱태스크 189건, 16.5초/30초) | 0% |
+| 화면 fps | 69 | 120 |
+| 50ms 넘게 끊긴 프레임 | 187개 | 0개 |
+
+**주의**: DevTools 스로틀은 Worker에 적용되지 않았다(Worker 모델 시간이 1배 기준에 가까움). 그래서 위 표에서 믿을 수 있는 건 "메인 스레드가 안 막힌다"는 부분뿐이다. 저사양 PC에서는 Worker 안의 추론도 같은 비율로 느려진다(약 80~100ms 예상). 코어가 적은 기기에서 Worker와 메인이 코어를 나눠 쓸 때의 효과는 **미검증**이다.
+
+## 2. 지금 모델을 쓰는 곳 (범위)
+
+| # | 위치 | 모델 | 빈도 | 이번 범위 |
+|---|---|---|---|---|
+| 1 | `camHub.startMonitoring` 감독 루프 | 얼굴 3 : 포즈 1 교대 | 최소 100ms | **1단계** |
+| 2 | `EnvCheckPanel` 환경 점검 `waitFrames` | 얼굴/포즈/손 (`camHub.models()` 직접 접근) | 100ms | **2단계** |
+| 3 | `phoneAnalysis.ts` 휴대폰 감시 | 손 + 물체(+ 밝기용 `getImageData`) | 200ms | 3단계 (`PHONE_CAM_ENABLED` 꺼져 있어 후순위) |
+| 4 | `check/deskScan.ts` 책상 스캔 | 물체 감지(IMAGE 모드, 타일) | 1.5초 | 3단계 |
+
+## 3. 목표 구조
+
+메인에 남기는 것: 카메라/`video`, 규칙 엔진(`RuleEngine`, 순수 계산이라 가벼움), 스냅샷(`captureSnapshot`, canvas), UI 상태.
+Worker로 옮기는 것: MediaPipe 모델 생성·추론과, 결과를 **작은 특징값으로 줄이는 변환**(`pcFeatures` 등).
+
+```
+메인 스레드                                   Web Worker
+camHub ── frameLoop(비동기) ── createImageBitmap(video) ──transfer──▶ 모델(face/pose/hand/object)
+   ▲                                                                     │ detectForVideo
+   └──────── PcFeatures (작은 객체) ◀──────────── pcFeatures() 변환 ─────┘
+RuleEngine.evaluate(features, 캡처 시각) → 위반 → 스냅샷 + outbox
+```
+
+- 랜드마크 478점 × 최대 3얼굴을 통째로 복사하지 않고 **필요한 값만**(`PcFeatures`, 환경 점검용 `FrameInfo`) 돌려준다. 메시지 크기와 복사 비용을 줄인다.
+- 프레임은 `ImageBitmap`을 **transfer**(복사 없음)하고 Worker가 쓴 뒤 `close()`한다.
+
+### 3.1 백엔드 인터페이스 (메인/Worker 두 구현)
+
+```ts
+// src/proctor/vision/visionBackend.ts (신규)
+export interface VisionBackend {
+  readonly kind: 'worker' | 'main'
+  init(kinds: VisionKind[]): Promise<{ delegate: 'GPU' | 'CPU'; loadMs: Record<string, number> }>
+  analyzePc(video: HTMLVideoElement, now: number): Promise<PcFeatures>   // 얼굴3:포즈1 교대 상태는 백엔드가 가진다
+  resetPc(): void                                                        // 재보정 시 교대 카운터 초기화
+  analyzeEnv(video: HTMLVideoElement, now: number, needs: Needs): Promise<FrameInfo>
+  dispose(): void
+}
+```
+
+- `MainBackend`: 지금 코드를 그대로 감싼 것(폴백 겸 A/B 비교용).
+- `WorkerBackend`: Worker 통신. 이 경계는 구현이 두 개라서 의미가 있다(YAGNI 위반 아님).
+- 선택: `features.ts`에 `VISION_WORKER_ENABLED` 플래그를 두고, 개발 중에는 `?vision=main|worker`로 강제할 수 있게 한다(기존 `?delegate=` 방식과 같은 패턴).
+
+### 3.2 메시지 규약
+
+```ts
+type ToWorker =
+  | { t: 'init'; kinds: VisionKind[]; delegate: 'auto' | 'GPU' | 'CPU'; wasmUrl: string; modelUrls: Record<string, string> }
+  | { t: 'pc'; id: number; ts: number; bitmap: ImageBitmap }
+  | { t: 'pc-reset' }
+  | { t: 'env'; id: number; ts: number; bitmap: ImageBitmap; needs: Needs }
+  | { t: 'dispose' }
+type FromWorker =
+  | { t: 'ready'; delegate: 'GPU' | 'CPU'; loadMs: Record<string, number> }
+  | { t: 'pc'; id: number; features: PcFeatures; ms: number }
+  | { t: 'env'; id: number; frame: FrameInfo; ms: number }
+  | { t: 'error'; id?: number; message: string }
+```
+
+- 요청은 **한 번에 하나만**(in-flight 1). Worker가 바쁘면 프레임을 버리고 최신만 처리한다(쌓지 않는다).
+- 응답은 요청 `id`와 캡처 시각 `ts`를 돌려준다. 규칙 엔진에는 **캡처 시각**을 넘겨 지속 시간 계산이 어긋나지 않게 한다.
+
+## 4. 변경 파일과 내용
+
+| 파일 | 변경 |
+|---|---|
+| `vision/visionBackend.ts`, `vision/mainBackend.ts`, `vision/workerBackend.ts`, `vision/visionWorker.ts` | 신규 |
+| `vision/camera.ts` `frameLoop` | `onFrame`이 `Promise`를 돌려주면 끝날 때까지 기다린 뒤 `allowedAt`을 계산하고 다음을 예약하도록 확장(겹쳐 실행되지 않음). 기존 동기 호출자는 그대로 |
+| `camHub.ts` | `models`/`CamModels`를 `vision: VisionBackend`로 교체. `openCamera`는 `backend.init`, `startMonitoring`의 `analyze`는 `await vision.analyzePc(v, now)`. 재보정 때 `resetPc()`. `stop()`에서 `dispose()` |
+| `react/EnvCheckPanel.tsx` | `camHub.models()` 직접 접근 제거 → `camHub.vision().analyzeEnv(...)` |
+| `vision/models.ts` | 모델 URL·옵션 상수를 메인/Worker가 같이 쓰도록 분리(옵션 중복 방지) |
+| `core/frameBudget.ts` | 변경 없음(`nextAllowedAt`의 busy×2 휴식은 Worker 쪽 CPU 점유도 절반 이하로 묶는 역할로 유지) |
+
+## 5. 단계
+
+- **0단계 스파이크 (게이트) — 부분 통과, 결과는 10장**: Vite 모듈 Worker에서 `@mediapipe/tasks-vision` 로딩(wasm 로더가 Worker에서 동작하는지), Worker 안 GPU delegate(OffscreenCanvas), 숨은 탭에서 `createImageBitmap(video)` 동작을 확인한다. 하네스에서는 Blob 클래식 Worker + `vision_bundle.cjs` 방식이 동작함을 확인했지만 Vite 번들 경로는 별개라서 확인이 필요하다. 실패하면 클래식 Worker 빌드나 하네스 방식으로 방향을 바꾼다.
+- **1단계 감독 루프 — 구현됨(2026-11-23), 실사용 검증 전**: 인터페이스·두 백엔드, `frameLoop` 비동기 확장, `camHub` 전환. 단위 테스트(tests/proctor/visionBackend, frameLoop)와 빌드 통과. 실제 카메라로 감독 전체 흐름은 아직 확인하지 않았다. 주소 끝에 `&vision=main` 또는 `&vision=worker`로 방식을 고정해 비교할 수 있다. 환경 점검(2단계)이 아직 메인 모델을 쓰기 때문에, 그동안 메인에도 모델이 올라가 있다(메모리 이중 사용, 2단계에서 해소).
+- **2단계 환경 점검 — 구현됨(2026-11-23), 실사용 검증 전**: `EnvCheckPanel`이 `camHub.visionBackend().analyzeEnv(...)`를 쓰고 `camHub.models()`는 제거했다. 백엔드에 `analyzeEnv`·`resetEnv`를 추가했고(요약값 `EnvFrameInfo`: 얼굴 수·상자·고개 좌우·어깨 보임·손 수), 손 모델은 Worker 안에서 손목 단계에서 처음 필요할 때 불러온다(개발 서버 측정: 첫 요청 약 540ms, 이후 약 28ms). **메인 스레드에는 모델이 올라가지 않는다**: `MainBackend`가 처음 쓰일 때(Worker 꺼짐·실패)에만 메인 모델을 불러온다(1단계 리뷰 M4 해소). 분석이 연달아 3번 실패하면 그 점검 단계는 실패(시간 초과와 같은 처리)로 끝낸다.
+- **3단계 휴대폰·책상 스캔**: 손/물체 모델과 밝기 계산(`getImageData`)을 Worker(OffscreenCanvas)로. 휴대폰 캠이 켜질 때 진행.
+- **4단계 검증**: 하네스와 실기기 측정, 회귀 테스트(아래).
+
+## 6. 실패 처리 · 폴백
+
+- Worker 생성·초기화 실패(지원 안 함, CSP, 로딩 시간 초과 30초 등)와 실행 중 `onerror` → 자동으로 `MainBackend`로 전환하고, 전환 사실을 로그에 남긴다(감독 기록에 "분석 방식: 메인" 정도로 남기는 안은 별도 결정).
+- 감독 중지·재보정·재연결 중에 날아가던 요청은 세대 번호(generation)로 버린다(`phoneAnalysis.ts`가 이미 쓰는 방식).
+- `camHub.stop()`에서 Worker `terminate`, 비트맵 `close`, 모델 `close`.
+
+## 7. 검증 기준
+
+| 구분 | 방법 | 통과 기준(임시) |
+|---|---|---|
+| 동등성 | 같은 프레임을 메인·Worker로 분석해 `PcFeatures` 비교(오차 허용 범위 명시) | 판정 경계에서 규칙 결과가 같음 |
+| 성능 | 하네스 `where=worker`, 4배·6배 스로틀 | 메인 스레드 막힘 5% 이하, 50ms 초과 프레임 1% 이하, 분석 4회/초 이상 |
+| 실기기 | 저사양 PC(코어 2~4, 메모리 4GB)에서 하네스 + 실제 응시 화면 입력 지연 확인 | 타이핑 끊김이 체감되지 않음 |
+| 회귀 | 기존 `tests/proctor/*`(rules, integration, frameBudget 등) 통과 + `frameLoop` 비동기, 백엔드 폴백, 세대 취소 단위 테스트 추가 | 전부 통과 |
+| 브라우저 | Chrome/Edge/Whale, Firefox, Safari | Worker와 ImageBitmap 동작 |
+
+## 8. 위험 · 미해결
+
+1. **Worker는 DevTools 스로틀로 재현되지 않는다** → 실기기 또는 코어 제한(프로세스 어피니티) 측정이 필요하다. 코어가 적으면 Worker가 메인과 코어를 나눠 써서 끊김이 0%까지 내려가지 않을 수 있다.
+2. 프레임마다 메인에서 하는 `createImageBitmap(video)` 비용은 하네스에서 따로 재지 않았다(틱 시간에 포함). 0단계에서 분리 측정한다.
+3. Worker에서 GPU delegate가 실패하거나 오히려 느릴 수 있다. 기본값(GPU 우선/CPU 우선)은 GPU·CPU 비교 실측 뒤에 정한다.
+4. CSP(`worker-src`, `connect-src`)와 CDN(jsdelivr, storage.googleapis.com) 허용 확인.
+5. 폰 경로(3단계)는 지금 꺼져 있어 실사용 검증이 어렵다.
+
+## 9. 결정 사항 (확정)
+
+1. **폴백 유지**: Worker가 안 되면 자동으로 `MainBackend`로 전환한다.
+2. **Worker 안 연산 장치는 CPU 먼저**: 임시 기본값이며 GPU/CPU 실측 뒤 바꿀 수 있다.
+3. **범위는 PC 감독(1·2단계)만 먼저**: 3단계(휴대폰·책상 스캔)는 휴대폰 캠을 다시 켤 때 진행한다.
+4. **노트북은 사양 기준으로 경고**: 브라우저는 노트북 여부를 확실히 구분할 수 없으므로 노트북인지 묻거나 차단하지 않는다. 사양과 실측 성능이 기준에 못 미치면 경고하고 감독관에게 표시한다.
+
+## 10. 0단계 스파이크 결과 (2026-11-23)
+
+코드: `frontend/tools/worker-spike/` (일회용, 앱 코드 아님). Vite 개발 서버(5174)의 모듈 Worker에서 `@mediapipe/tasks-vision@1.2.3` 얼굴 모델을 돌렸다. 카메라 대신 canvas 캡처 영상 사용, 워밍업 5회 제외 30회.
+
+| 항목 | 결과 |
+|---|---|
+| 기본 로더(`FilesetResolver.forVisionTasks`) | **실패**: `ModuleFactory not set.` |
+| 모듈용 로더 직접 지정 (`wasmLoaderPath: .../vision_wasm_module_internal.js`, `wasmBinaryPath: .../vision_wasm_module_internal.wasm`) | **CPU 성공**(로딩 624ms), **GPU 성공**(로딩 148ms) |
+| 추론 p50 / p95 (Worker 안) | CPU 8.9 / 15.1ms, GPU 7.7 / 10.4ms |
+| 메인의 `createImageBitmap(video)` 비용 | p50 0.5ms, p95 0.8ms (640×480) |
+| 프레임 전달 포함 왕복 | CPU p50 9.6ms / GPU p50 8.5ms |
+| 스파이크 중 메인 롱태스크 | 0건 |
+
+**결론**: Vite 모듈 Worker 방식은 **가능하다. 단, 모듈용 wasm 로더를 직접 지정해야 한다.** 설계(3장)는 그대로 진행할 수 있다. Worker 안 GPU delegate도 이 환경(Chromium, Windows)에서는 동작했다.
+
+**구현에 반영할 것**
+- Worker 모델 생성은 `FilesetResolver.forVisionTasks` 대신 위 두 경로로 만든 fileset을 쓴다. 이 파일명은 패키지 내부 구조라서 **버전을 고정(1.2.3)하고 업그레이드 때 다시 확인**한다.
+- 메인의 프레임 전달 비용(약 0.5ms)은 문제가 되지 않는다(위험 8장-2 해소).
+- 로더 실패 시 폴백(메인 방식)으로 자동 전환하는 설계가 그대로 유효하다.
+
+**1단계 구현 중 추가로 발견한 것 (2026-11-23)**
+- 한 Worker에서 모델을 **둘 이상** 만들면(얼굴 → 포즈) 같은 로더 주소를 두 번 `import`해서 두 번째가 `ModuleFactory not set.`으로 실패한다(스파이크는 모델이 하나라 안 드러남). 브라우저가 모듈을 캐시해서 로더가 다시 실행되지 않기 때문으로 보인다.
+- 해결: 로더 주소 끝에 `?instance=<모델 이름>`을 붙여 모델마다 다른 주소로 만든다(`visionAssets.ts`의 `moduleFileset`). 개발 서버 브라우저에서 얼굴+포즈 Worker 백엔드가 폴백 없이 12회 분석에 성공했다.
+
+**1단계 코드 리뷰 반영 (2026-11-23)**
+- 반영: Worker 응답 없음 타임아웃(분석 1회 10초, 초과하면 `BackendFatalError`로 백엔드를 닫고 폴백) · 요청 직렬화(분석 사이에 재보정이 끼어들지 않음) · 프레임 하나의 오류와 백엔드 사망(`BackendFatalError`) 구분(일시 오류에는 폴백으로 갈아타지 않음) · `postMessage` 실패 시 비트맵 정리 · 중지·재시작 경쟁(`monitorGen`을 대기 앞에서 올림, 로딩 Promise를 자기 것일 때만 비움) · 연속 실패 처리를 `guardedAnalyzer`로 분리해 테스트.
+- **남은 한계**
+  - 환경 점검(2단계)이 끝나기 전까지 메인에도 얼굴·포즈·손 모델이 올라간다(메모리·로딩 이중). 아이폰 사파리는 WebGL 메모리 문제가 있었으므로 폴백용 메인 모델을 필요할 때 늦게 불러오는 방안을 2단계에서 검토한다.
+  - 폴백 전환 사실은 콘솔 경고와 `camHub.visionFallbackReason()`(진단용)으로만 남고 서버·감독 기록에는 안 남는다. 새 이벤트 종류는 서버 계약 변경이 필요해서 이번에 하지 않았다. 운영에서 "저사양 의심/Worker 실패"를 알려면 11장 성능 자가 측정과 함께 별도로 정한다.
+  - 연속 3회 실패로 감독이 오류 상태가 되면 망가진 백엔드를 버린다. 이후 다시 시도(재보정·재연결)하면 새 백엔드로 시작한다.
+  - Firefox·Safari와 숨은 탭은 아직 확인하지 않았다.
+  - 이벤트 스냅샷은 분석이 끝난 뒤 찍어서 분석 프레임과 수십 ms 어긋날 수 있다(허용 범위로 판단).
+
+**한계 (아직 확인 못 함)**
+- 스파이크 영상에는 얼굴이 없어서(`facesOnLastFrame: 0`) 얼굴 랜드마크 단계가 생략됐다. 위 추론 시간은 **실제 얼굴이 있을 때(하네스 CPU 약 17ms)보다 낮게** 나온 값이다.
+- **숨은 탭**에서의 `createImageBitmap(video)` 동작은 확인하지 못했다(미리보기 환경에서 탭이 숨겨지지 않음). 실제 브라우저에서 다른 탭으로 이동한 채 측정이 필요하다.
+- 확인한 브라우저는 Chromium 계열 한 종류뿐이다. Firefox·Safari는 미확인.
+- 개발 서버에서만 확인했다. `vite build` 결과물(운영 번들)에서의 Worker 경로와 CSP는 별도 확인이 필요하다.
+
+## 11. 환경 점검 성능 자가 측정 (구현됨 2026-11-23, 임계값은 잠정)
+
+**구현 요약** (아래 초안 중 실제로 한 것)
+- 환경 점검에 `performance`(이 PC의 분석 속도) 항목을 추가했다. 조명·자세 다음에 얼굴이 보이는 상태에서 감독 루프와 같은 분석(`analyzePc`, 최소 간격 + 걸린 시간만큼 휴식)을 약 4초(워밍업 2회 제외) 돌려 분석 1회 시간, 초당 횟수, 메인 스레드 막힘(`longtask`)을 잰다. 코드: `check/perfCheck.ts`(판정, 단위 테스트), `check/perfProbe.ts`(측정), `EnvCheckPanel`.
+- **입장은 막지 않는다**(pass/warn만). 느리면 점검 결과에 사유(분석 시간·초당 횟수·코어 수)를 남기고 분석 간격을 늘린다(정상 100ms → 느린 편 200ms → 많이 느림 300ms, `camHub.setAnalysisIntervalMs`). 점검 결과 JSON의 항목 하나로 들어가므로 **서버 계약 변경은 없다**(`envCheck`는 JSON 그대로 저장, 최대 20,000자). 감독관 콘솔은 기존 요약(주의 항목)으로 보인다.
+- 임계값(잠정): 분석 1회 p95 130ms 초과 = 느린 편, 250ms 초과 또는 초당 4회 미만 또는 표본 5개 미만 = 많이 느림. 폴백(메인 분석)이면 메인 막힘 20% 이상 = 느린 편.
+- **검증**(앱 코드 경로, 코어 제한, 얼굴 있는 정지 이미지): 제한 없음 = 정상(p95 33ms, 초당 9.8) · 2코어 일반 속도 = 정상(p95 111ms, 8.4) · 2코어 약 2.5배 느림 = 느린 편(p95 214ms, 5.1) · 1코어 약 2.5배 느림 = 많이 느림(p95 281ms, 4.1) · 메인 분석 + 2코어 느림 = 느린 편(막힘 52%). 12장 표와 같은 방향으로 판정된다.
+- 남은 일: 실제 저사양 PC로 임계값 확정, 실제 웹캠(얼굴 움직임)에서의 재확인, 응시 안내문에 권장 사양 문구 추가.
+
+(아래는 구현 전 초안이다. 구현과 다른 부분은 위 요약이 우선한다.)
+
+목적: 저사양 PC를 응시 전에 알아내서 안내하고, 분석 주기를 자동으로 조절한다. 기존 정책(점검 실패여도 입장은 열고 감독 기록에 남김)과 같이 **입장은 막지 않는다**.
+
+**측정 시점**: 환경 점검에서 모델이 준비된 직후, 얼굴·포즈 분석을 약 3초(20~30회) 돌린다. 응시자는 별도 조작이 필요 없다.
+
+**수집 지표** (하네스에서 이미 쓰는 것과 같다)
+- 분석 1회 시간(Worker 왕복 포함) p50, p95
+- 메인 스레드 막힘 비율(`longtask` 합계 / 측정 시간), 화면 갱신 fps(`requestAnimationFrame`)
+- 기기 정보: `hardwareConcurrency`, `deviceMemory`(Chrome 계열만 값이 있음)
+
+**판정과 동작** (임계값은 실기기 측정 뒤 확정, 아래는 자리 표시)
+
+| 판정 | 조건(미정) | 동작 |
+|---|---|---|
+| 정상 | 분석 p95와 메인 막힘이 기준 이내 | 그대로 진행 |
+| 저사양 의심 | 코어·메모리가 기준 미만이거나 분석 p95/메인 막힘이 기준 초과 | 응시자에게 안내(다른 프로그램 종료, 권장 사양), 분석 최소 간격을 100ms → 200ms로 늘림, 감독 기록에 "저사양 의심" 표시 |
+| 측정 실패 | Worker 초기화 실패 등 | 폴백(메인)으로 전환하고 같은 측정을 다시 한 번 수행, 기록 |
+
+**미정/주의**
+- `deviceMemory`는 Chrome 계열에서만 제공되고 최대 8로 잘려 나와서, 보조 지표로만 쓴다.
+- 임계값(예: p95 몇 ms, 막힘 몇 %)은 저사양 실기기 또는 코어 제한 환경에서 측정해 정한다.
+- 응시 안내문의 권장 사양(코어, 메모리, 브라우저) 문구는 임계값 확정 뒤에 쓴다.
+- 분석 주기를 늘리면 규칙 판정의 시간 해상도가 떨어진다. 가장 짧은 규칙이 1초 이상 지속 기준이라 200ms까지는 영향이 작다고 보지만, 규칙 테스트로 확인해야 한다.
+
+## 12. 저사양 흉내 측정 결과 (2026-11-23, 앱 코드 경로)
+
+**방법**: 개발 PC(Core Ultra 7 155H, 22스레드)에서 별도 프로필 Edge를 띄워 **브라우저의 모든 프로세스를 지정한 코어에만 묶고**(프로세스 어피니티) 실제 앱 코드(`createPcBackend`, `frameLoop`, 최소 100ms 간격)로 감독 루프를 30초 돌렸다. DevTools CPU 스로틀은 Worker에 적용되지 않아서(8장-1) 이 방식으로 Worker까지 함께 느리게 만들었다. 이 PC의 20·21번 논리 코어(저전력 코어)는 단순 반복문 기준 일반 코어보다 약 2.5배 느렸다. 입력은 얼굴이 있는 정지 이미지(MediaPipe 공식 샘플)를 영상처럼 쓴 것이다. 도구: `frontend/tools/lowspec-bench/{app-path.html,app-path.ts,run-affinity.mjs}`.
+
+| 코어 제한 | 방식 | 모델 준비 | 분석 속도 | 분석 1회 p50 / p95 | 화면 fps | 50ms↑ 프레임 | 메인 막힘 |
+|---|---|---|---|---|---|---|---|
+| 제한 없음 | 메인 | 5.8초 | 8.9/초 | 18 / 30ms | 32 | 101 | 21% |
+| 제한 없음 | Worker | 1.1초 | 9.6/초 | 25 / 33ms | 113 | 7 | 약 0% |
+| 2코어(일반 속도) | 메인 | 6.3초 | 8.6/초 | 27 / 64ms | 27 | 99 | 35% |
+| 2코어(일반 속도) | Worker | 2.2초 | 6.9/초 | 34 / 213ms | 111 | 8 | 3% |
+| 2코어(약 2.5배 느림) | 메인 | 18.2초 | 7.9/초 | 62 / 78ms | **15** | **231** | **76%** |
+| 2코어(약 2.5배 느림) | Worker | 4.7초 | 6.4/초 | 66 / 129ms | **119** | **0** | **0%** |
+| 1코어(약 2.5배 느림) | 메인 | 18.8초 | 7.7/초 | 64 / 81ms | **9** | **149** | **87%** |
+| 1코어(약 2.5배 느림) | Worker | 6.9초 | 3.7/초 | 81 / 265ms | **116** | 3 | 1% |
+
+(제한 없음 Worker는 첫 시도에서 초기화 30초 초과로 실패했고 같은 조건 재시도에서 성공했다. 모델 내려받기 지연 같은 일시적 원인으로 보이지만 확정하지 못했다.)
+
+**읽는 법**
+- **효과는 분명하다**: 느린 코어에서 메인 방식은 화면이 15fps 이하로 떨어지고 입력이 끊길 만큼 막히지만(막힘 76~87%), Worker 방식은 화면이 거의 그대로(111~119fps)다. 모델을 올리는 동안의 멈춤도 메인은 18초까지, Worker는 메인을 막지 않는다.
+- **대가는 분석 속도**: Worker도 느린 코어에서는 분석 1회가 60~80ms(p95 130~265ms)로 늘고 분석 횟수가 초당 3.7~6.9회로 떨어진다. 가장 짧은 규칙이 1초 이상 지속 기준이라 판정은 가능해 보이지만, 1코어 조건(초당 3.7회, p95 265ms)은 여유가 크지 않다. 규칙 판정에 영향이 없는지는 규칙 테스트로 따로 확인해야 한다.
+- 이 흉내는 **코어 수와 코어 속도만** 제한한다. 메모리 4GB 부족, 발열, 약한 내장 GPU는 재현하지 못했다.
+
+**한계**: 각 조건 1회 측정(반복 없음). 입력은 정지 얼굴 이미지라 실제 웹캠(움직임, 여러 얼굴)과 다를 수 있다. 개발 서버(압축 전 코드)에서 쟀다. 타이머 지연 지표(`timerLag` p99·최대)는 창이 가려지는 등으로 튀어서 읽지 않았다. 제한 없음 메인의 fps 32는 같은 PC의 앞선 하네스 측정(119fps)과 달라서 입력이 얼굴 이미지인 영향인지 확인이 필요하다.
+
+**11장 임계값에 대한 잠정 제안** (이 측정에만 근거한 초안이며 실기기 측정으로 확정한다)
+- 분석 1회 p95가 약 130ms 이하면 정상, 약 130~250ms면 "저사양 의심"(간격 확대·안내), 약 250ms 초과 또는 분석 속도 4회/초 미만이면 강한 경고.
+- Worker가 아니라 메인으로 돌고 있는 경우(폴백)는 메인 막힘이 20% 이상이면 저사양 의심으로 본다.
