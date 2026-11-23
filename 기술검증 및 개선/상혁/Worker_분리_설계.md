@@ -129,7 +129,7 @@ type FromWorker =
 
 ## 10. 0단계 스파이크 결과 (2026-11-23)
 
-코드: `frontend/tools/worker-spike/` (일회용, 앱 코드 아님). Vite 개발 서버(5174)의 모듈 Worker에서 `@mediapipe/tasks-vision@1.2.3` 얼굴 모델을 돌렸다. 카메라 대신 canvas 캡처 영상 사용, 워밍업 5회 제외 30회.
+코드: 일회용 스파이크 페이지(커밋하지 않고 삭제함. 같은 확인을 앱 코드 `vision/visionWorker.ts`가 대신한다). Vite 개발 서버(5174)의 모듈 Worker에서 `@mediapipe/tasks-vision@1.2.3` 얼굴 모델을 돌렸다. 카메라 대신 canvas 캡처 영상 사용, 워밍업 5회 제외 30회.
 
 | 항목 | 결과 |
 |---|---|
