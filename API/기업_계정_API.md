@@ -1,6 +1,6 @@
 # 기업 계정 API 명세
 
-> 기준 구현: pAIr-back `backend/src/main/java/com/pair/company/` 및 `backend/src/main/java/com/pair/web/auth/`
+> 기준 구현: pAIr-back `backend/src/main/java/com/pair/domain/company/` 및 `backend/src/main/java/com/pair/domain/auth/`
 > 기업 회원은 자체 가입하지 않는다. 도입 문의 승인 시 CSV 명단으로 계정을 만들고, 이후 매니저가 감독관을 초대한다.
 
 ## 공통 규칙
@@ -62,10 +62,10 @@ CSV 내부 중복 이메일, 허용되지 않은 역할, 매니저 수 오류, �
 
 ### 문의 승인·거절
 
-- `POST /api/admin/company-inquiries/{inquiryId}/approve` — `200`, 회사 정보를 반환한다. 승인은 트랜잭션으로 처리되며 회사 생성, 문의 승인 및 명단 계정 생성을 수행한다. 계정별 역할은 CSV 값으로 시작한다.
+- `POST /api/admin/company-inquiries/{inquiryId}/approve` — `200`, 회사 정보를 반환한다. 승인은 트랜잭션으로 회사 생성, 문의 승인, 명단 계정 저장까지만 처리하고 바로 응답한다(H2 테스트에서 1,000명 약 1초). 계정은 로그인할 수 없는 상태(`onboardingMailStatus=PENDING`)로 저장되며, 임시 비밀번호 생성과 메일 발송은 커밋 뒤 별도 스레드에서 한 명씩 처리한다. 계정별 역할은 CSV 값으로 시작한다.
 - `POST /api/admin/company-inquiries/{inquiryId}/reject` — `204`.
 
-승인 시 각 계정에는 임시 비밀번호가 발급되어 해당 이메일로 전달된다. 최초 일반 기능 이용 전 이메일 인증과 비밀번호 변경이 필요하다. 이메일 또는 비밀번호는 응답으로 반환하지 않는다.
+승인 시 각 계정에는 임시 비밀번호가 발급되어 해당 이메일로 전달된다. 전달 결과는 계정의 `onboardingMailStatus`에 기록되고(`PENDING` 처리 중 → `SENT` 보냄 / `FAILED` 실패), 화면은 새로고침해야 갱신된다. 한 명이 실패해도 나머지는 계속 보낸다. 서버가 중간에 꺼져 `PENDING`으로 남거나 `FAILED`이면 관리자가 온보딩 재발급을 한다. 최초 일반 기능 이용 전 이메일 인증과 비밀번호 변경이 필요하다. 이메일 또는 비밀번호는 응답으로 반환하지 않는다.
 
 ### 회사와 매니저 관리
 
@@ -74,7 +74,7 @@ CSV 내부 중복 이메일, 허용되지 않은 역할, 매니저 수 오류, �
 - `POST /api/admin/companies/{companyId}/manager` — `{"name":"새 매니저","email":"new@example.com"}`를 받아 매니저를 교체한다. 기존 매니저는 해지·탈퇴 처리되며 새 기업 계정과 임시 비밀번호가 발급된다. `200` 응답:
 
 ```json
-{"companyId": 10, "managerUserId": 42, "message": "새 매니저 계정을 생성하고 인증 안내 메일을 발송했습니다."}
+{"companyId": 10, "managerUserId": 42, "message": "새 매니저 계정을 생성했습니다. 인증 안내 메일을 곧 발송합니다."}
 ```
 
 - `POST /api/admin/members/{userId}/onboarding/reissue` — 이메일 인증 및 비밀번호 변경이 끝나지 않은 기업 계정의 임시 비밀번호를 재발급한다. 이전 세션·인증 코드는 무효화되고 기존 임시 비밀번호로 로그인할 수 없다. 새 임시 비밀번호에는 만료 시간이 없다. 회원은 로그인한 뒤 인증 코드 발송 API로 새 코드를 요청해야 한다. `200` 응답은 회원 정보와 `emailVerified`, `passwordChangeRequired`, `onboardingMailStatus`를 포함하며 비밀번호는 포함하지 않는다.
@@ -108,8 +108,8 @@ CSV로 발급된 기업 계정은 `POST /api/auth/login`에 임시 비밀번호�
 
 1. `POST /api/auth/onboarding/email-verifications` — 로그인 필요. 로그인 이메일로 인증 코드를 발송한다. `202 {"message":"인증 코드를 이메일로 보냈습니다."}`. 이 코드는 만료 시각 없이 발급되며, 재발급하면 이전 코드는 무효화된다.
 2. `POST /api/auth/onboarding/email-verification` — 로그인 필요. `{"code":"123456"}`를 제출한다. 성공 시 `204`.
-3. `PATCH /api/auth/password` — 로그인 필요. `{"currentPassword":"임시비밀번호","newPassword":"새비밀번호123"}`를 제출한다. 새 비밀번호는 8~72자이며 성공 시 `204`. 임시 비밀번호를 변경하기 전까지 로그인할 때마다 비밀번호 변경 상태가 유지된다.
+3. `PATCH /api/auth/password` — 로그인 필요. `{"currentPassword":"임시비밀번호","newPassword":"새비밀번호123"}`를 제출한다. 새 비밀번호는 8~72자이며 현재 비밀번호와 같으면 `400`(메일로 받은 임시 비밀번호를 그대로 쓸 수 없다). 성공 시 `204`. 임시 비밀번호를 변경하기 전까지 로그인할 때마다 비밀번호 변경 상태가 유지된다.
 
-온보딩 이메일 코드 발급은 60초 간격이며, 인증 시도는 코드당 최대 5회다. 코드는 만료되지 않지만 새 코드를 발급하거나 인증 완료 시 기존 코드는 더 이상 사용할 수 없다.
+온보딩 이메일 코드 발급은 60초 간격이며, 인증 시도는 코드당 최대 5회다. 틀린 코드의 실패 횟수는 요청이 `400`으로 끝나도 남는다. 코드 확인 뒤 가입이 실패하면 코드 소비도 함께 취소되어 같은 코드로 다시 시도할 수 있다. 메일 발송이 실패하면 방금 저장한 코드를 지우므로 60초를 기다리지 않고 바로 다시 요청할 수 있다(감독관 초대 가입 코드, 일반 가입 코드도 같다). 코드는 만료되지 않지만 새 코드를 발급하거나 인증 완료 시 기존 코드는 더 이상 사용할 수 없다.
 
 `GET /api/auth/me` 응답의 회원 객체는 `id`, `email`, `name`, `role`, `companyId`, `emailVerified`, `passwordChangeRequired`를 포함한다. `emailVerified=false`이면 이메일 인증 화면, `passwordChangeRequired=true`이면 비밀번호 변경 안내를 표시한다.
