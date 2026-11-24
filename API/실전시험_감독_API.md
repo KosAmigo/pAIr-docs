@@ -238,7 +238,7 @@ PC  ── rtc {signal:{kind:"answer", sdp}} ───────────�
 - ICE 서버: 프론트 환경변수 `VITE_TURN_URL`(쉼표로 여러 개), `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL`. 기본은 공개 STUN 만 쓴다. 학교·회사 망까지 지원하려면 TURN 이 필요하다
 - 다른 네트워크의 폰이 붙으려면 `phoneUrl` 이 공인 HTTPS 주소여야 한다. 개발 릴레이는 `PAIR_PUBLIC_ORIGIN` 환경변수로 지정한다
 
-> 개발용 릴레이: pAIr-front `frontend/server/proctorRelay.ts` (Vite 개발 서버 플러그인). 위 규칙을 구현했고, **서버가 만드는 이벤트(`PHONE_DISCONNECTED`)만** 백엔드 1-7 로 저장한다. 운영 릴레이(Spring WebSocket)는 **아직 없다** — 개발 릴레이와 같은 동작을 만들어야 한다. `pAIr-front/scripts/dev-all.mjs` 가 터널·백엔드·프론트를 함께 띄운다.
+> 개발용 릴레이: pAIr-front `frontend/server/proctorRelay.ts` (Vite 개발 서버 플러그인). 위 규칙을 구현했고, **서버가 만드는 이벤트(`PHONE_DISCONNECTED`)만** 백엔드 1-7 로 저장한다. 운영 릴레이(Spring WebSocket `/ws/proctor`)는 휴대폰 프레임 중계(§7-1)와 감독관 영상 시그널링(§6-11, 2026-11-24)을 구현했다. `pAIr-front/scripts/dev-all.mjs` 가 터널·백엔드·프론트를 함께 띄운다.
 
 ---
 
@@ -433,7 +433,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 7. 정확도: 실제 휴대폰·책·두 사람 사진으로 `CONFIRMED`/`UNCONFIRMED` 비율과 오탐·미탐 확인.
 
 ### 6-11. 제안 6: 감독관 실시간 영상 시그널링 (5단계)
-> **상태: 프론트·개발 릴레이 구현 완료, 운영 백엔드 제안.** 프론트(응시자 송신 `proctor/relay/viewerSender.ts`, 감독관 시청 `proctor/watch/`·`pages/console/LiveWatch.tsx`)와 개발 릴레이 임시 구현은 끝났다 (`tests/proctor/viewer.test.ts`, `watchRelay.test.ts`). 운영 백엔드는 같은 메시지를 Spring WebSocket(`/ws/proctor`)으로 구현하면 된다. 근거: [기술검증 및 개선/상혁/intent/proctor-client-analysis.md](../기술검증%20및%20개선/상혁/intent/proctor-client-analysis.md) (5단계).
+> **상태(2026-11-24): 운영 백엔드(Spring `/ws/proctor`)에도 구현했다. 아래 "운영 백엔드 구현(2026-11-24)" 참고. 개발 릴레이는 그대로 남아 있다.** 이전 상태: 프론트·개발 릴레이 구현 완료, 운영 백엔드 제안. 프론트(응시자 송신 `proctor/relay/viewerSender.ts`, 감독관 시청 `proctor/watch/`·`pages/console/LiveWatch.tsx`)와 개발 릴레이 임시 구현은 끝났다 (`tests/proctor/viewer.test.ts`, `watchRelay.test.ts`). 운영 백엔드는 같은 메시지를 Spring WebSocket(`/ws/proctor`)으로 구현하면 된다. 근거: [기술검증 및 개선/상혁/intent/proctor-client-analysis.md](../기술검증%20및%20개선/상혁/intent/proctor-client-analysis.md) (5단계).
 
 **원칙 (사용자 확정)**: 감독관이 그 응시자를 **열었을 때만** 휴대폰·웹캠·화면 공유 영상을 보낸다(상시 전송 없음). 감독관은 한 명씩만 본다. WebRTC P2P 로 충분하고 SFU 는 쓰지 않는다. **영상은 서버를 지나지 않고 저장하지 않는다** (서버는 시그널링만 넘긴다). 감독관이 안 보고 있어도 이벤트 감지·기록은 응시자 PC 가 계속한다.
 
@@ -459,6 +459,18 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 - `sessionId + participantId` ↔ 응시자 PC 연결(입장 토큰)은 서버가 DB 로 안다. 콘솔은 입장 토큰을 모른다.
 - 감독관이 열고 닫은 사실(누가, 누구를, 언제부터 언제까지)을 감사용으로 남기는 것을 권장한다 (영상은 저장하지 않지만 열람 기록은 남긴다).
 - 응시자에게는 감독관이 보고 있다는 사실을 알린다 (프론트가 화면 공유 동의 문구에 안내를 넣었다. 보고 있는 감독관 수는 응시자 PC 가 안다).
+
+**운영 백엔드 구현(2026-11-24, 서버 1대·TURN 없음 기준)** — 의도: [docs/intent/감독관-실시간-보기-운영-시그널링.md](../docs/intent/감독관-실시간-보기-운영-시그널링.md)
+- 위 표의 메시지를 `ProctorRelayService` 가 그대로 처리한다. 감독관은 `hello` 없이 `watch` 로 붙는다(첫 `watch` 가 hello 를 대신하고 그 연결은 감독관 연결이 된다).
+- **로그인 확인**: 브라우저 WebSocket 은 연결할 때 헤더를 못 붙이므로 프론트가 `watch` 의 `auth` 에 로그인 헤더(`Authorization: Bearer …`)를 실어 보낸다. 서버는 REST 와 같은 규칙으로 확인한다(`WebSocketUserResolver`: 기본 bearer 는 액세스 토큰 검증, 개발용 `pair.auth.mode=header` 는 `X-Pair-*`). 허용한 키(`authorization`, `x-pair-*`)만 읽고 값은 4,096자 이하 문자열만 받는다. 토큰은 로그에 남기지 않는다.
+- **권한·회차 상태**(`ViewerAccessService`): 로그인 없음·응시자 계정·다른 회사 회차·없는 응시자·다른 회차 번호 → `denied`. 감독을 안 쓰는 회차·취소·종료·제출한 응시자 → `error`(한국어 사유). 시작 전·아직 입장 전 → `offline`(프론트가 5초마다 다시 열어 본다). 진행 중이고 입장했고 제출 전이면 열린다.
+- **응시자 PC 찾기**: PC 가 `hello-pc` 로 붙을 때 입장 토큰으로 (회차, 대상자) 를 알아 짝에 붙여 둔다(`RelayAuthService.identify`). 감독관은 (회차, 대상자) 로 찾는다. 연습(사전 테스트) 짝에는 응시자 번호가 없어 열 수 없다. PC 가 한 번도 붙지 않았으면 `offline`.
+- **정원**: 응시자 1명당 동시에 `MAX_VIEWERS_PER_PARTICIPANT = 2`(프론트 `watchRoom.ts` 와 같은 값). 넘으면 `watch-state: full`, 한 명이 나가면 다시 들어올 수 있다.
+- **전달 규칙**: `view-rtc` 는 형식을 검사한 뒤 알려진 필드만 새로 만들어 넘긴다(`ViewSignalService`). 감독관은 `answer`·`candidate`·`request`, 응시자 PC 는 `offer`·`candidate`·`unavailable` 만 보낼 수 있다(그 밖의 종류·모르는 채널은 버린다). sdp 32,000자·candidate 2,000자 이하. 응시자 PC 가 보낸 신호는 `viewer` 번호의 감독관에게만 가고, 그 짝을 보는 감독관이 아니면 아무에게도 가지 않는다(다른 응시자로 새지 않는다).
+- **PC 재접속**: PC 가 끊기면 보고 있던 감독관에게 `offline`, 다시 붙으면 `watching` 과 `viewer-request` ×3 을 다시 보낸다. 감독관이 닫거나 끊기면 PC 에 `viewer-gone`.
+- **상한(임시값, 실측 전)**: PC·감독관 연결의 텍스트 메시지 40,000바이트(sdp 때문에 컨테이너 기본 8KB 에서 키운다, 그 밖의 연결은 4,096바이트), 연결 하나당 시그널링 초당 60개(넘는 것은 버리고 초당 300개 넘게 초과하면 연결을 끊음), 감독관 연결의 `watch` 최소 간격 500ms(권한 확인이 DB 를 읽는다).
+- **열람 기록**: 열고 닫을 때 서버 로그에 감독관 번호·회차·응시자·시청 번호·시청 시간(초)을 남긴다. DB 테이블은 만들지 않았다(감사용 저장이 필요해지면 추가). 영상은 서버를 지나지 않고 저장하지 않는다.
+- **한계**: 짝·시청 정보는 서버 메모리에만 있다(서버 1대 기준, 여러 대면 공용 전달 통로가 필요). TURN 이 없어 직접 연결이 안 되는 네트워크에서는 채널이 `failed` 가 되고 콘솔에 "영상 연결 안 됨"으로 표시한다. 개발 PC 두 대·실제 카메라로는 아직 확인하지 않았다.
 
 **개발 릴레이의 임시 방식 (운영에서 쓰지 말 것)**: 개발 릴레이(`frontend/server/proctorRelay.ts`)는 감독관이 `watch` 에 실어 보낸 로그인 헤더(`X-Pair-*`, `Authorization`)로 백엔드 `GET /api/console/sessions/{id}` 를 불러 권한을 확인하고(401·403·404 → `denied`), 응답의 참가자 이메일·회차 이름이 같은 응시자 PC 연결을 그 응시자로 본다. 운영 백엔드는 이 우회가 필요 없다. 로그인 헤더를 메시지에 싣는 것도 개발 전용이다.
 
@@ -490,7 +502,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 - **프레임**: 휴대폰 → **binary JPEG**(최대 100KB, JPEG 시작 바이트 검사). 서버는 **최신 한 장만** PC 로 binary 로 넘기고, 느린 PC 면 이전 프레임을 버린다(대기열 없음). 장당 약 13~15KB 가 되도록 휴대폰이 기종별로 화질을 자동 조절하고(실측: 같은 설정에서 아이폰이 갤럭시의 1.6~1.8배), 변화가 없으면 건너뛰며(평균 변화량 약 0.04), 숨은 탭에서는 생존 신호를 멈춘다.
 - **생존 신호·무신호**: 휴대폰 → `{"type":"heartbeat"}` 5초마다, `{"type":"phone-status","status":{...}}` (숫자·참거짓·64자 이하 문자열 필드만 PC 로 전달). **15초 무신호면 PC 에 `peer: stale`**.
 - **서버 상한(임시값, `RelayLimits`, 실측 전; 정하는 방법은 §7-5)**: 전체 연결 1000, 휴대폰 300, 짝 1000, 연습 짝 100, 휴대폰 1대 초당 5프레임(넘는 프레임 폐기, 1초에 50개 넘으면 연결 끊음), 연결 후 10초 안에 hello 없으면 닫음, 소켓당 hello 1회, 연습 짝은 비면 60초 뒤 삭제. 거절 시 `{"type":"error","message":"지금은 연결이 많아…"}`. 짝은 서버 메모리에만 있고(서버 1대 기준), PC·휴대폰 둘 다 10분 없으면 짝을 지운다.
-- **개발 릴레이(Vite `proctorRelay.ts`)와 다른 점**: 운영 중계에는 WebRTC 시그널링(`rtc`, `view-rtc`, `watch`)과 `phone-alert` 전달, 서버가 직접 PHONE_DISCONNECTED 이벤트를 저장하는 동작이 없다. 휴대폰 끊김·stale 이벤트는 PC 가 `peer` 메시지를 받아 자기 이벤트 보관함(아웃박스)으로 올린다.
+- **개발 릴레이(Vite `proctorRelay.ts`)와 다른 점**: 운영 중계에는 휴대폰↔PC 사이 WebRTC 시그널링(`rtc`)과 `phone-alert` 전달, 서버가 직접 PHONE_DISCONNECTED 이벤트를 저장하는 동작이 없다(감독관 영상용 `watch`·`view-rtc` 는 2026-11-24 에 운영에도 구현, §6-11). 휴대폰 끊김·stale 이벤트는 PC 가 `peer` 메시지를 받아 자기 이벤트 보관함(아웃박스)으로 올린다.
 - **TURN 불필요**: 프레임이 WebSocket 으로 가므로 [휴대폰_보조캠_사용중단.md](../기술검증%20및%20개선/상혁/휴대폰_보조캠_사용중단.md) 의 TURN 조건이 사라진다. 대신 운영 릴레이(Spring WebSocket, `spring-boot-starter-websocket`)가 필수다.
 - **화질 신호 결정(2026-11-23, 구현 필요)**: PC → 서버 → 휴대폰으로 `{"type":"quality","mode":"watch"|"scan"}` 를 전달한다. 서버는 PC 에서 온 이 메시지만 `mode` 두 값 검사 후 그대로 휴대폰에 넘긴다(그 밖의 값·휴대폰 쪽에서 온 것은 버림). 연결 직후 기본은 `watch`(낮은 화질), PC 가 책상 스캔을 시작할 때 `scan`, 끝나면 `watch`. 휴대폰은 받은 다음 프레임부터 적용한다. 운영 중계 `ProctorRelayService` 에 구현되어 있다(2026-11-24 코드 확인: PC 발 `quality` 만 받아 `watch`·`scan` 검사 뒤 휴대폰에 전달, 새로 붙은 휴대폰에는 현재 모드를 보낸다).
 - **미구현**: 입장 토큰 재검증(연결 시점 1회만), 짝 코드 일회성.
