@@ -168,7 +168,7 @@
 | `CONNECTION_LOST` `LINK_EXPIRED` | BROWSER | 시험 화면 연결이 90초 넘게 끊겼다 돌아옴, 유예(5분) 안에 돌아오지 않아 링크 만료 (**서버가 §1-9 에서 만든다**, 요청으로는 받지 않는다) |
 
 > 브라우저 이벤트(`TAB_HIDDEN` `WINDOW_BLUR` `MOUSE_LEAVE` `FULLSCREEN_EXIT` `PASTE`)도 이 API(1-7)로 `source=BROWSER`, 사진 없이 보낸다. 응시 화면의 `anti-cheating` 이 감지한 신호를 `proctor/core/events.ts` 의 `toBrowserViolation` 이 같은 이벤트 형식으로 바꾼다.
-> 화면 공유 이벤트(`SCREEN_STOPPED` `SCREEN_PARTIAL`)와 `source=SCREEN` 은 **아직 받지 않는다**. 프론트는 `SCREEN_EVENTS_ACCEPTED=false` 로 전송을 막아 두었다 (§6-6).
+> **화면 공유 이벤트(2026-11-24 구현, V25)**: `source=SCREEN` 과 유형 `SCREEN_STOPPED`(공유 중단) · `SCREEN_PARTIAL`(전체 화면이 아닌 창·탭만 공유) · `SCREEN_RESTARTED`(끊겼던 공유를 다시 시작)를 이 API 로 받는다. **종류와 시각만 저장하고 사진·증거 구간은 받지 않는다**(사진을 붙이면 400 "브라우저 이벤트와 화면 공유 이벤트에는 사진을 붙이지 않습니다.", 증거 구간 업로드도 거절). 콘솔 이벤트 목록에는 다른 이벤트와 함께 보이고, 사진이 없어도 `snapshotMissing` 은 `null` 이다. 프론트는 시험 중에만 보내고(연습 제외) 중단 뒤 다시 공유하면 `SCREEN_RESTARTED` 를 남긴다 (`screenContract.ts`, `camHub.ts`). §6-6 의 "화면 사진" 제안은 이 결정으로 **채택하지 않았다**.
 
 ---
 
@@ -176,7 +176,7 @@
 
 > **재개됨(2026-11-23):** 휴대폰 캠은 **WebRTC 영상 대신 JPEG 프레임을 서버 중계**로 응시자 PC 에 보낸다(TURN 불필요). 아래 §2-1~§2-5 는 **개발 릴레이(Vite 플러그인)의 영상 방식**을 적은 것이고, 운영 서버 릴레이(binary 프레임)는 §7-1 이다. 개발 릴레이도 바이너리 프레임을 쓰도록 바뀌었으나 이 절의 `rtc` 시그널링 설명은 갱신하지 않았다(감독관 영상 보기 §6-11 의 WebRTC 는 별개로 유지).
 >
-> **현재 상태(2026-11-23):** 프론트 스위치(`proctor/features.ts`)는 `PHONE_CAM_ENABLED=false`, `SCREEN_SHARE_ENABLED=true` 라서 응시 흐름은 웹캠 + PC 화면 공유를 쓴다. 화면 공유 이벤트 서버 전송은 `SCREEN_EVENTS_ACCEPTED=false` 로 아직 꺼져 있다. 이 절의 릴레이와 §6-11 의 휴대폰 채널은 `PHONE_CAM_ENABLED` 를 켰을 때의 동작이다.
+> **현재 상태(2026-11-23):** 프론트 스위치(`proctor/features.ts`)는 `PHONE_CAM_ENABLED=false`, `SCREEN_SHARE_ENABLED=true` 라서 응시 흐름은 웹캠 + PC 화면 공유를 쓴다. 화면 공유 이벤트는 2026-11-24 부터 서버에 저장한다(§1-7). 이 절의 릴레이와 §6-11 의 휴대폰 채널은 `PHONE_CAM_ENABLED` 를 켰을 때의 동작이다.
 
 PC 와 휴대폰을 잇는다. **이 WebSocket 으로는 영상이 오가지 않는다.** 휴대폰 영상은 `rtc` 메시지(시그널링)로 맺은 WebRTC 연결로 PC 에 직접 가고, 서버에 저장되지 않는다 (§2-5). 메시지는 모두 JSON 문자열. 최대 2MB.
 
@@ -277,6 +277,7 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | GET | `/api/console/sessions/{id}/results` | 순위·분포·역량별 평균·상하위 비교·감독 합계·지표 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/env-scan` | 대상자의 환경 점검 사진 목록 (§1-8, 감독관도 볼 수 있다) |
 | GET | `/api/console/sessions/{id}/env-scan/{photoId}/image` | 환경 점검 사진 (image/jpeg) |
+| GET | `/api/console/sessions/{id}/env-check-failures` | **점검 미통과 입장자** 목록(2026-11-24). 입장했고(`enteredAt`) 동의와 함께 저장된 점검 결과(`pc.items`·`phone.items`)에 `status=fail` 항목이 있는 응시자만: `[{participantId, name, email, enteredAt, checkedAt, failed:[{id,label,detail}], noticeSent}]`. `noticeSent` 는 안내 메시지를 한 번이라도 보냈는지. 입장하지 않았거나 실패가 없거나 점검 JSON 모양이 달라 읽을 수 없으면 제외한다(오류 없이 빈 목록). 감독관도 볼 수 있다 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/env-check` | 환경 점검 결과 `{source: LIVE\|SAVED, updatedAt, result}`. 진행 상태(`env_check_progress`)와 저장된 결과 중 **더 최근 것**, 둘 다 없으면 204. 감독관도 볼 수 있다 |
 | POST | `/api/console/sessions/{id}/participants/{pid}/notices` | 응시자에게 안내 메시지 `{message}`(최대 500자, 일방향). 시험 전·중에만, **취소·종료된 회차는 400**. 감독관도 보낼 수 있다 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/notices` | 보낸 안내와 읽음 여부 `[{id, message, sentAt, readAt}]` |
@@ -343,7 +344,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 | `source` | 요청의 `source` 는 받기만 하고, 저장·응답의 출처는 **`type` 이 정한다** (`Type.source()`). `Source` 열거형은 `BROWSER·PC_CAM·PHONE_CAM` 뿐 | `ProctorEvent.Type/Source` |
 | 서버 확인 필드 | 없음 (엔티티·DTO·콘솔 응답 모두) | `ProctorEvent`, `ExamDtos.ProctorEventView` |
 | 재확인 처리·큐 | 없음 | — |
-| 화면 공유 | `SCREEN` 출처·유형 없음. 프론트는 `SCREEN_EVENTS_ACCEPTED=false` 로 전송을 막아 두었다 | pAIr-front `frontend/src/proctor/screen/screenContract.ts` |
+| 화면 공유 | 2026-11-24 구현: `SCREEN` 출처·세 유형(V25), 사진 없음 (§1-7) | pAIr-front `frontend/src/proctor/screen/screenContract.ts` |
 | 분석 중단 감지 | 없음 (`PHONE_DISCONNECTED` 는 릴레이의 휴대폰 연결 감시) | §2-4 |
 
 ### 6-3. 제안 1: 서버 확인 상태 필드
@@ -397,7 +398,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 | 비용 | 서버 부하 없음 | 이미지 처리 부하 |
 
   **권고**: 클라이언트 흐림 유지(개인정보 최소화) + 서버는 형식·크기만 검사. 서버가 흐림 정도를 검증할 수 있으면(예: 고주파 성분 검사) 덧붙이되 필수는 아니다. 화면 사진은 **재확인(§6-3) 대상에서 제외**한다 (화면 내용 분석은 범위 밖).
-- 백엔드가 받게 되면 프론트는 `screenContract.ts` 의 `SCREEN_EVENTS_ACCEPTED` 를 `true` 로 바꿔 전송을 켠다.
+- **결정(2026-11-24)**: 화면 공유 이벤트는 사진을 붙이지 않는다. 백엔드는 `SCREEN` 출처와 유형을 받는다(§1-7, V25). 위 "흐림 처리 위치" 논의는 사진을 다시 붙이기로 할 때만 필요하다.
 
 ### 6-7. 제안 5: 분석 중단 감지
 응시자가 분석을 끄거나 막는 것을 탐지하기 위한 제안이다 (완전한 방어는 아님. 계획 문서 위험 (e)).
@@ -491,7 +492,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 - **서버 상한(임시값, `RelayLimits`, 실측 전; 정하는 방법은 §7-5)**: 전체 연결 1000, 휴대폰 300, 짝 1000, 연습 짝 100, 휴대폰 1대 초당 5프레임(넘는 프레임 폐기, 1초에 50개 넘으면 연결 끊음), 연결 후 10초 안에 hello 없으면 닫음, 소켓당 hello 1회, 연습 짝은 비면 60초 뒤 삭제. 거절 시 `{"type":"error","message":"지금은 연결이 많아…"}`. 짝은 서버 메모리에만 있고(서버 1대 기준), PC·휴대폰 둘 다 10분 없으면 짝을 지운다.
 - **개발 릴레이(Vite `proctorRelay.ts`)와 다른 점**: 운영 중계에는 WebRTC 시그널링(`rtc`, `view-rtc`, `watch`)과 `phone-alert` 전달, 서버가 직접 PHONE_DISCONNECTED 이벤트를 저장하는 동작이 없다. 휴대폰 끊김·stale 이벤트는 PC 가 `peer` 메시지를 받아 자기 이벤트 보관함(아웃박스)으로 올린다.
 - **TURN 불필요**: 프레임이 WebSocket 으로 가므로 [휴대폰_보조캠_사용중단.md](../기술검증%20및%20개선/상혁/휴대폰_보조캠_사용중단.md) 의 TURN 조건이 사라진다. 대신 운영 릴레이(Spring WebSocket, `spring-boot-starter-websocket`)가 필수다.
-- **화질 신호 결정(2026-11-23, 구현 필요)**: PC → 서버 → 휴대폰으로 `{"type":"quality","mode":"watch"|"scan"}` 를 전달한다. 서버는 PC 에서 온 이 메시지만 `mode` 두 값 검사 후 그대로 휴대폰에 넘긴다(그 밖의 값·휴대폰 쪽에서 온 것은 버림). 연결 직후 기본은 `watch`(낮은 화질), PC 가 책상 스캔을 시작할 때 `scan`, 끝나면 `watch`. 휴대폰은 받은 다음 프레임부터 적용한다. 현재 운영 중계에는 이 경로가 **아직 없다**.
+- **화질 신호 결정(2026-11-23, 구현 필요)**: PC → 서버 → 휴대폰으로 `{"type":"quality","mode":"watch"|"scan"}` 를 전달한다. 서버는 PC 에서 온 이 메시지만 `mode` 두 값 검사 후 그대로 휴대폰에 넘긴다(그 밖의 값·휴대폰 쪽에서 온 것은 버림). 연결 직후 기본은 `watch`(낮은 화질), PC 가 책상 스캔을 시작할 때 `scan`, 끝나면 `watch`. 휴대폰은 받은 다음 프레임부터 적용한다. 운영 중계 `ProctorRelayService` 에 구현되어 있다(2026-11-24 코드 확인: PC 발 `quality` 만 받아 `watch`·`scan` 검사 뒤 휴대폰에 전달, 새로 붙은 휴대폰에는 현재 모드를 보낸다).
 - **미구현**: 입장 토큰 재검증(연결 시점 1회만), 짝 코드 일회성.
 - 규모 가늠(**실측 기반 추정**, 480×360·화질 0.5·2fps·휴대폰 1대): 갤럭시 약 0.21Mbps(시간당 약 97MB), 아이폰 약 0.35Mbps(약 158MB). 100대 동시 2시간 약 19~32GB(건너뛰기 없음, 한 방향)가 서버를 지나므로 대역폭·무료 한도는 **미정**.
 - **응시자 PC 쪽(프론트 `main`)**: 휴대폰 분석(손·물체·밝기)을 웹캠 분석 Worker 와 **별도의 Worker** 로 돌리고 실패 시 메인으로 폴백한다. 환경 점검 성능 자가 측정에 휴대폰 분석 비용을 넣어 느린 PC 는 두 분석 간격을 함께 늘린다.
@@ -510,7 +511,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
   확정/기각은 **기존 판정 API**(`PUT .../events/{eventId}/review`, `OK`·`SUSPECT`)를 쓴다.
 - **완료된 회차에서도 볼 수 있다**: 콘솔 이벤트 조회·판정·사진·구간 API 는 회차 종료 여부를 검사하지 않고 회사 권한(`ConsoleAccess.requireSession`)만 본다. 보관 기간이 지난 사진은 삭제 오류. 프론트 콘솔은 증거 구간 타임라인·삭제 예정 표시·연장 버튼을 추가했고(Playwright 시나리오 있음), 제출 전 응시자도 이벤트가 있으면 열 수 있다.
 - 권한: 감독관(PROCTOR)·매니저(MANAGER)·관리자(ADMIN), 자기 회사 회차만(다른 회사는 404).
-- **구간 규칙 결정(2026-11-23, 구현 필요)**: ① **합계 24장 = 채널별 최대 12장**(PC 웹캠 12 + 휴대폰 12) ② 채널당 **1초 간격**(앞 8초 + 뒤 4초 = 12장이라 정확히 맞는다; 한쪽 채널만 있으면 그 채널만 12장) ③ 요청 본문 **최대 2MB**, 사진 한 장 **최대 100KB**(휴대폰 중계 한도와 같음) ④ 대상자당 증거가 붙은 이벤트 100건(이미 구현)은 §1-7 의 감독 사진 300장 규칙과 **따로 센다**(대표 사진 1장 + 증거 구간은 별개 한도). 최악의 경우 대상자 1명 약 100건 × 24장 × 20KB ≈ 48MB. 현재 서버는 합계 1~24장만 검사하므로 **채널별 12장 검사와 본문 2MB 상한을 추가해야 한다**.
+- **구간 규칙 결정(2026-11-23, 구현됨 — `EvidenceClipService`, 2026-11-24 확인)**: ① **합계 24장 = 채널별 최대 12장**(PC 웹캠 12 + 휴대폰 12) ② 채널당 **1초 간격**(앞 8초 + 뒤 4초 = 12장이라 정확히 맞는다; 한쪽 채널만 있으면 그 채널만 12장) ③ 요청 본문 **최대 2MB**, 사진 한 장 **최대 100KB**(휴대폰 중계 한도와 같음) ④ 대상자당 증거가 붙은 이벤트 100건(이미 구현)은 §1-7 의 감독 사진 300장 규칙과 **따로 센다**(대표 사진 1장 + 증거 구간은 별개 한도). 최악의 경우 대상자 1명 약 100건 × 24장 × 20KB ≈ 48MB. 서버는 합계 24장, 채널별 12장, 같은 채널 1초 간격, 요청 본문(base64 문자 수 합) 2MB, 사진 한 장 100KB 를 검사한다.
 
 ### 7-3. 보관 기간 · 연장
 - **기본**: 감독 사진·증거 구간 사진은 **회차 종료 7일 뒤 삭제**한다(`pair.exam.snapshot-retention-days` 코드 기본값·`application.yml` 모두 **7**로 바꿈). 환경 점검 사진은 연장 대상이 아니라 7일 뒤 삭제 그대로다. 연장 단위는 **회차 단위**다: 연장하면 그 회차의 감독 사진과 증거 구간 사진의 삭제 시각이 함께 늦춰진다.
@@ -524,7 +525,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 
 - 알림은 **콘솔 표시만**(메일·푸시 없음).
 - **동의 문구(적용됨, `CONSENT_VERSION='v2'`)**: 사진은 시험 종료 7일 뒤 삭제하며, 기업 담당자는 삭제 2일 전부터 7일씩 최대 2번 보관을 연장할 수 있어 최대 21일까지 보관될 수 있다는 내용(프론트 `Entry.tsx`).
-- **연장 대상 결정(2026-11-23, 구현 필요)**: **종료(완료)된 회차만** 연장할 수 있다. 미시작·진행 중·취소된 회차는 400 "종료된 회차만 보관을 연장할 수 있습니다."(취소 회차는 사진이 거의 없고 진행 중은 아직 삭제 예정이 없다). 현재 서버에는 이 검사가 **아직 없다**.
+- **연장 대상 결정(2026-11-23, 구현됨 — `SnapshotRetentionService.extend`, 2026-11-24 확인)**: **종료(완료)된 회차만** 연장할 수 있다. 미시작·진행 중·취소된 회차는 400 "종료된 회차만 보관을 연장할 수 있습니다."(취소 회차는 사진이 거의 없고 진행 중은 아직 삭제 예정이 없다). 서버가 연장 요청 때 검사한다.
 
 ### 7-4. 테이블 (Flyway 적용됨)
 - `proctor_event_frames` (V24): `frame_id`, `session_id`, `event_id`, `source`(PC_CAM/PHONE_CAM), `offset_ms`(-8000~4000), `storage_key`, `size_bytes`, `created_at`, `deleted_at`. UNIQUE(`event_id`, `source`, `offset_ms`). (초안 이름은 `proctor_evidence_frames`)
