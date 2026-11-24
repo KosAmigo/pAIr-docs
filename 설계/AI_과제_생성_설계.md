@@ -79,7 +79,7 @@ GeneratedTaskWriter      Draft → tasks, task_files, task_questions, question_c
 | --- | --- | --- |
 | track | DEV / BIZ | |
 | jobRole | 자유 입력 (백엔드, 서비스 기획, 재무 …) | |
-| difficulty | 초급 / 중급 / 고급 | 기존 과제 값과 맞춤 |
+| difficulty | 쉬움 / 보통 / 어려움 | 기존 과제 값과 맞춤 |
 | topic | 자유 입력 | 예: 쿠폰 할인 계산 |
 | trap | 자유 입력 | 예: 쿠폰 두 장을 겹치면 할인이 중복 적용 |
 | usage | 공개 문제(SELF) / 비공개 문제(LIVE) | 기본 SELF. 검수 전에는 콘솔에서 바꿀 수 있음 |

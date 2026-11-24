@@ -89,8 +89,8 @@ put("credit_purchases", CP, [4, 3, 200, 9900, "READY", None, "2026-11-17T09:00:0
 
 # ── 과제 ──
 CATALOG = {
-    "order-deadlock": ("주문이 3초 넘게 멈췄다가 실패합니다. 잠금 순서와 재고 정합성 문제를 찾아 고치세요.", "DEV", "장애 분석", "중급"),
-    "pricing-plan": ("이탈 설문과 매출 자료로 저가 요금제 출시 여부를 판단하는 1페이지 기획안을 씁니다.", "BIZ", "기획서", "중급"),
+    "order-deadlock": ("주문이 3초 넘게 멈췄다가 실패합니다. 잠금 순서와 재고 정합성 문제를 찾아 고치세요.", "DEV", "장애 분석", "보통"),
+    "pricing-plan": ("이탈 설문과 매출 자료로 저가 요금제 출시 여부를 판단하는 1페이지 기획안을 씁니다.", "BIZ", "기획서", "보통"),
 }
 TK = ["task_id", "code", "title", "summary", "description", "requirements", "track", "category", "difficulty", "time_limit_min", "usage", "status",
       "parent_task_id", "created_by", "created_at", "updated_at", "published_at"]
@@ -130,14 +130,14 @@ for code in ["order-deadlock", "pricing-plan"]:
 
 # ── AI로 만든 숨김 초안 과제 (예시): 검수 전이라 HIDDEN, 공개 시각 없음 ──
 put("tasks", TK, [3, "inventory-sync", "재고 동기화 지연 원인 분석", "주문 직후 재고가 늦게 줄어드는 문제를 찾아 고치세요.", "(AI 생성 초안) 주문 서비스와 재고 서비스 사이 이벤트 처리가 늦어 …",
-                  "- 지연 원인을 찾아 NOTES.md에 정리\n- 지연을 없애는 수정\n- 회귀 테스트 추가", "DEV", "장애 분석", "중급", 60, "SELF", "HIDDEN", None, 1,
+                  "- 지연 원인을 찾아 NOTES.md에 정리\n- 지연을 없애는 수정\n- 회귀 테스트 추가", "DEV", "장애 분석", "보통", 60, "SELF", "HIDDEN", None, 1,
                   "2026-11-16T03:00:00Z", "2026-11-16T03:00:00Z", None])
 # ── 기업용(LIVE) 과제: 자가진단 목록에 나오지 않는다. 자가진단 과제를 바탕으로 복제했다고 가정(복제 원본 = 1, 2번) ──
 put("tasks", TK, [4, "payment-lock-live", "결제 승인 교착 원인 분석", "결제 승인 요청이 몰리면 멈춥니다. 잠금 순서를 찾아 고치세요.", "(기업용) 결제 승인과 포인트 차감이 서로 잠금을 기다리며 …",
-                  "- 교착 원인을 찾아 NOTES.md에 정리\n- 교착 없이 동작하도록 수정\n- 동시성 테스트 추가", "DEV", "장애 분석", "중급", 60, "LIVE", "OPEN", 1, 1,
+                  "- 교착 원인을 찾아 NOTES.md에 정리\n- 교착 없이 동작하도록 수정\n- 동시성 테스트 추가", "DEV", "장애 분석", "보통", 60, "LIVE", "OPEN", 1, 1,
                   "2026-11-09T00:00:00Z", "2026-11-09T00:00:00Z", "2026-11-09T00:00:00Z"])
 put("tasks", TK, [5, "bundle-plan-live", "번들 요금제 출시 기획안", "설문과 매출 자료로 번들 요금제 출시 여부를 판단하는 기획안을 씁니다.", "(기업용) 통신·OTT 번들 요금제를 내놓을지 …",
-                  "- 결론과 근거 3개\n- 리스크와 대응\n- 수치는 자료와 일치", "BIZ", "기획서", "중급", 40, "LIVE", "OPEN", 2, 1,
+                  "- 결론과 근거 3개\n- 리스크와 대응\n- 수치는 자료와 일치", "BIZ", "기획서", "보통", 40, "LIVE", "OPEN", 2, 1,
                   "2026-11-09T00:00:00Z", "2026-11-09T00:00:00Z", "2026-11-09T00:00:00Z"])
 LIVE_DEV, LIVE_BIZ = 4, 5
 put("task_files", ["task_file_id", "task_id", "path", "content", "storage_key", "mime_type", "size_bytes", "visibility", "read_only"],
