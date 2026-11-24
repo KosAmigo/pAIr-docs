@@ -24,7 +24,7 @@ check_id,item_key,code,track,method,points,label
 23,delivery,D2,DEV,AUTO,2,엣지 케이스 누락 (숨은 선택 테스트 실패)
 24,delivery,D3,DEV,AUTO,3,수정을 확인하는 테스트를 추가하지 않음
 25,delivery,D4,DEV,JUDGE,3,NOTES.md의 원인 설명이 비어 있거나 핵심 원인과 맞지 않음
-26,delivery,D5,ALL,AUTO,4,첫 유효 결과가 30분을 넘김(-2) 또는 도달하지 못함(-4)
+26,delivery,D5,ALL,AUTO,4,첫 유효 결과가 과제 제한 시간을 넘김 또는 도달하지 못함(-4)
 27,potential,P1,ALL,JUDGE,5,후속 질문 답변이 근거 없이 한두 마디에 그침
 28,potential,P2,ALL,JUDGE,4,채택하지 않은 AI 제안과 그 이유를 설명하지 못함
 29,potential,P3,ALL,JUDGE,3,오류나 테스트 실패에서 원인을 확인하지 않고 같은 시도를 반복함
