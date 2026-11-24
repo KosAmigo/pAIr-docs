@@ -16,6 +16,7 @@ pAIr(AI 활용 역량 진단 플랫폼) 기획·설계·평가·API 문서. 코�
 | `설계/` | ERD(영문).png, ERD(한글).png | 데이터 모델 그림 (테이블 39개, auth_sessions·proctor_event_types·env_scan_photos·env_check_progress·proctor_notices 등은 그림에 아직 없음 → 정의서 기준 44개) |
 | | erd/pair_schema.sql, erd/테이블_정의서.md | ERD 원본 DDL(PostgreSQL)과 테이블 설명 |
 | | erd/sample/ | 샘플 데이터 생성·적재·검증 스크립트와 CSV |
+| | 샌드박스_서버_운영.md | 샌드박스 서버(코드 실행 전용) 구성, 환경변수, 실행, 보안, 시험 날 순서 체크리스트 (EC2 확인 전 초안) |
 | | 카메라_감독_설계.md | 정현의 카메라 감독 서버 추론(RunPod) 제안. 2026-11-23 확정 방향(PC 분석 유지)과 어긋나 팀 결정 필요 |
 | | 카메라_감독_설계_상혁.md | 상혁의 카메라 감독 설계(PC 분석 유지, 휴대폰 JPEG 프레임 중계, 증거 구간·보관 연장). 구현됨/예정 구분 |
 | | 아키텍처/ | 전체 시스템 · AI 서비스 · 인프라 및 배포 아키텍처 (PNG, HTML 원본, 로고, render.sh) |
