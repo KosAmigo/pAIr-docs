@@ -272,7 +272,7 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | POST | `/api/console/sessions/{id}/participants/{pid}/invite` | 초대 메일 다시 보내기 (**새 토큰 발급, 이전 링크 무효**) |
 | GET | `/api/console/sessions/{id}/events` | 회차 전체 감독 이벤트 (시간순, `participantId` 포함). 콘솔이 대상자마다 따로 부르지 않게 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/events` | 대상자 한 명의 감독 이벤트 (판정 포함) |
-| PUT | `/api/console/sessions/{id}/events/{eid}/review` | 담당자 판정 `{review: "OK"\|"SUSPECT"\|null, note}`. `null` 이면 판정을 지움. 판정자(`reviewedBy`)는 로그인한 사람 |
+| PUT | `/api/console/sessions/{id}/events/{eid}/review` | 담당자 판정 `{review: "OK"\|"SUSPECT"\|null, note}`. `null` 이면 판정을 지움. 판정자(`reviewedBy`)는 로그인한 사람. **카메라 이벤트(`PC_CAM`·`PHONE_CAM`)만 판정한다(2026-11-24).** 브라우저(`BROWSER`)·화면 공유(`SCREEN`) 이벤트는 400("판정하지 않고 기록만 봅니다"). 이들은 응시자에게 경고만 보이고 콘솔에는 이력(시각)만 남는다 |
 | GET | `/api/console/sessions/{id}/events/{eid}/snapshot` | 사진 (image/jpeg, no-store) |
 | GET | `/api/console/sessions/{id}/results` | 순위·분포·역량별 평균·상하위 비교·감독 합계·지표 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/env-scan` | 대상자의 환경 점검 사진 목록 (§1-8, 감독관도 볼 수 있다) |
@@ -433,6 +433,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 7. 정확도: 실제 휴대폰·책·두 사람 사진으로 `CONFIRMED`/`UNCONFIRMED` 비율과 오탐·미탐 확인.
 
 ### 6-11. 제안 6: 감독관 실시간 영상 시그널링 (5단계)
+> **2026-11-24 저녁 결정: 실시간 영상 보기는 스위치로 껐다 (웹캠·화면 공유 모두).** 응시자가 휴대폰 핫스팟이면 영상 연결(ICE)이 실패하는 경우가 확인됐고(STUN 만 있고 TURN 없음), 이벤트 기록과 사진 증거로 감독하기로 했다. 코드·서버 시그널링은 지우지 않았다. 프론트 `proctor/features.ts` 의 `LIVE_VIEW_ENABLED`(기본 `false`, `VITE_LIVE_VIEW_ENABLED=true` 로 켬)가 꺼져 있으면 콘솔 감독 패널에 "영상 보기"(`LiveWatch`)가 나오지 않는다. 백엔드는 `pair.exam.live-view-enabled`(기본 `false`, 환경변수 `PAIR_LIVE_VIEW_ENABLED=true`)가 꺼져 있으면 `watch` 에 `watch-state` `error` + "실시간 영상 보기는 지금 사용하지 않습니다…" 로 거절한다. 화면 공유는 응시자 쪽에서 그대로 유지하고 중단·재시작 이벤트만 기록한다. 아래 내용은 스위치를 켰을 때의 동작이다. 의도: [브라우저-이벤트-경고와-감독관-화면-정리.md](../docs/intent/브라우저-이벤트-경고와-감독관-화면-정리.md)
 > **상태(2026-11-24): 운영 백엔드(Spring `/ws/proctor`)에도 구현했다. 아래 "운영 백엔드 구현(2026-11-24)" 참고. 개발 릴레이는 그대로 남아 있다.** 이전 상태: 프론트·개발 릴레이 구현 완료, 운영 백엔드 제안. 프론트(응시자 송신 `proctor/relay/viewerSender.ts`, 감독관 시청 `proctor/watch/`·`pages/console/LiveWatch.tsx`)와 개발 릴레이 임시 구현은 끝났다 (`tests/proctor/viewer.test.ts`, `watchRelay.test.ts`). 운영 백엔드는 같은 메시지를 Spring WebSocket(`/ws/proctor`)으로 구현하면 된다. 근거: [기술검증 및 개선/상혁/intent/proctor-client-analysis.md](../기술검증%20및%20개선/상혁/intent/proctor-client-analysis.md) (5단계).
 
 **원칙 (사용자 확정)**: 감독관이 그 응시자를 **열었을 때만** 휴대폰·웹캠·화면 공유 영상을 보낸다(상시 전송 없음). 감독관은 한 명씩만 본다. WebRTC P2P 로 충분하고 SFU 는 쓰지 않는다. **영상은 서버를 지나지 않고 저장하지 않는다** (서버는 시그널링만 넘긴다). 감독관이 안 보고 있어도 이벤트 감지·기록은 응시자 PC 가 계속한다.
@@ -511,7 +512,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 
 ### 7-2. 이벤트 증거 구간 업로드·조회
 - **무엇을 저장하나**: 이벤트 하나에 대해 **앞 8초 / 뒤 4초(시간 기준, 이벤트당 최대 24장)** 의 사진. 응시자 PC 가 웹캠·휴대폰 프레임을 **로컬 링 버퍼**에 두었다가 이벤트 후 **약 5초 뒤** 올린다(연속 업로드 없음). 파일은 파일 저장소(키 `exam-clips/{회차}/{이벤트}/{사진}.jpg`, S3·로컬 공통)에, DB 는 키·크기·시각만 둔다. **대상자당 증거가 붙은 이벤트는 최대 100건**.
-- **업로드**: `POST /api/entry/{token}/proctor-events/{clientId}/clip`. 요청 `{frames:[{source:"PC_CAM"|"PHONE_CAM", offsetMs:-8000..4000, image:"data:image/jpeg;base64,..."}]}` (1~24장). 응답 201, 본문 없음. 같은 (이벤트, source, offsetMs)는 한 장만 저장하고 재전송은 건너뛴다(멱등). 이벤트는 먼저 `proctor-events`(§1-7)로 `clientId` 와 함께 저장돼 있어야 한다(없으면 404). 카메라 이벤트만, 회차 종료 30분 뒤까지. (초안은 `/evidence`·`{eventId}` 였으나 구현은 `/clip`·`{clientId}`)
+- **업로드**: `POST /api/entry/{token}/proctor-events/{clientId}/clip`. 요청 `{frames:[{source:"PC_CAM", offsetMs:-8000..4000, image:"data:image/jpeg;base64,..."}]}` (1~12장, **웹캠(`PC_CAM`) 사진만** — 2026-11-24 부터 `PHONE_CAM` 은 400. 이미 저장된 예전 휴대폰 사진은 콘솔에서 "이전 기록"으로 계속 보인다). 응답 201, 본문 없음. 같은 (이벤트, source, offsetMs)는 한 장만 저장하고 재전송은 건너뛴다(멱등). 이벤트는 먼저 `proctor-events`(§1-7)로 `clientId` 와 함께 저장돼 있어야 한다(없으면 404). 카메라 이벤트만, 회차 종료 30분 뒤까지. (초안은 `/evidence`·`{eventId}` 였으나 구현은 `/clip`·`{clientId}`)
 - **조회(콘솔)**
 
   | 메서드 | 경로 | 설명 |
