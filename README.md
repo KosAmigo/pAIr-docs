@@ -28,7 +28,7 @@ pAIr(AI 활용 역량 진단 플랫폼) 기획·설계·평가·API 문서. 코�
 | - | [검증_결과.md](검증_결과.md) | 산출물과 실제 코드의 대조 결과, 아직 구현되지 않은 것 |
 
 ## 측정 결과 (팀원 3: 응시 흐름)
-제품 코드로 직접 쟀다(2026-11-21, 8코어 맥, 실제 PostgreSQL). 방법과 표는 [담당_기술명세_문희.md](기획/담당_기술명세_문희.md) 8절, 측정 테스트는 pAIr-back 의 `*BenchTest`(환경변수 `PAIR_BENCH=1` 일 때만 실행).
+제품 코드로 직접 쟀다(2026-11-21, 8코어 맥, 실제 PostgreSQL). 방법과 표는 [담당_기술명세_문희.md](기획/담당_기술명세_문희.md) 8절, 측정 테스트(`CheckpointRestoreBenchTest`, `JavaDiagnosticsBenchTest`, `SandboxConcurrencyBenchTest`)는 평소 빌드에서 쓰이지 않아 2026-11-24 에 삭제했다(커밋 `9a2f4ff`). 다시 잴 때는 `9a2f4ff^` 에서 파일을 되살려 `PAIR_BENCH=1` 로 돌린다.
 
 | 항목 | 목표 | 결과 | 조건 |
 |---|---|---|---|
