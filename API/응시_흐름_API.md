@@ -1,7 +1,7 @@
 # 응시 흐름 API 명세
 
 > 작성: 문희 · 2026-11-23 · 대상: 프론트, 팀원 · 상태: **구현됨** (pAIr-back `develop`)
-> 기준 구현: pAIr-back `backend/src/main/java/com/pair/web/ApiController.java` 및 `com/pair/attempt/`, `com/pair/question/`
+> 기준 구현: pAIr-back `backend/src/main/java/com/pair/domain/attempt/controller/AttemptController.java` 및 `domain/attempt/`, `domain/question/`, 코드 실행은 `infra/sandbox/` (2026-11-24 패키지 개편 반영)
 > 범위: 자가진단 응시(과제 선택 → 편집 → 빌드·실행 → AI 채팅 → 제출 → 후속 질문 → 리포트)와 복기(체크포인트·트리·비교·롤백).
 > 채팅 첨부 상세는 [채팅_첨부_API.md](채팅_첨부_API.md), 과제 자료 PDF는 [응시_자료_PDF_API.md](응시_자료_PDF_API.md)를 본다.
 
@@ -97,7 +97,7 @@
 }
 ```
 
-실행 모드는 `pair.run.mode`(`local` 서버 JVM / `docker` 격리 컨테이너, 환경변수 `PAIR_RUN_MODE`)로 고른다. docker 모드에서는 동시 실행 상한(4)을 넘으면 최대 60초 줄을 서고, 넘으면 **503** `실행 대기열 초과`로 거절한다. 이때는 잠시 뒤 다시 시도하면 된다.
+실행 모드는 `pair.run.mode`(환경변수 `PAIR_RUN_MODE`)로 고른다: `local` 서버 JVM 직접 실행, `docker` 같은 서버의 격리 컨테이너, `remote` 별도 샌드박스 서버(실행 전용 API)에 맡김. docker 모드에서는 동시 실행 상한(4)을 넘으면 최대 60초 줄을 서고, 넘으면 **503** `실행 대기열 초과`로 거절한다. remote 모드에서 샌드박스 서버가 꽉 찼거나 닿지 않아도 같은 503 이다. 이때는 잠시 뒤 다시 시도하면 된다. 응시 API 의 요청·응답은 모드와 무관하게 같다(§11).
 
 ## 4. 편집기 도우미 (입력 중 분석)
 
@@ -299,5 +299,20 @@ AI 질문마다 체크포인트가 하나 생긴다(질문을 보낸 순간의 �
 ## 10. 알려진 한계
 
 - 실전 응시(`user_id` 없음)는 이 API를 초대 토큰으로 들어와 쓰므로 소유 확인을 거치지 않는다. 실전 입장 인증은 팀원 4와 정할 일이다.
-- 기본 실행 모드가 `local`(서버 JVM 직접 실행)이다. 배포 때 `PAIR_RUN_MODE=docker` 로 지정해야 한다. 앱 서버와 샌드박스 서버를 나누는 `RemoteDockerRunner` 는 아직 코드에 없다.
+- 기본 실행 모드가 `local`(서버 JVM 직접 실행)이다. 배포 때 `PAIR_RUN_MODE=remote`(샌드박스 서버 분리) 또는 `docker`(한 서버)로 지정해야 한다.
 - 대시보드는 목록 API와 최근 리포트를 따로 불러 응시 5개 기준 약 50쿼리를 쓴다. 복기 트리는 노드마다 리포트 JSON을 읽어 점수만 뽑는다.
+
+## 11. 샌드박스 서버 실행 전용 API (내부용)
+
+`pair.run.mode=remote` 일 때 앱 서버의 `RemoteDockerRunner` 가 샌드박스 서버를 부르는 API 다. **프론트는 부르지 않는다.** 샌드박스 서버는 같은 jar 의 `SandboxServerConfig`(프로필 `sandbox-server`)로 띄우고, DB·API 키 없이 켜지며 안에서는 `SandboxRunner` 가 컨테이너를 만든다.
+
+| 메서드 | 경로 | 요청 | 응답 |
+|---|---|---|---|
+| POST | `/internal/build` | `{"sources": {"src/…java": "내용"}}` | 빌드 응답(§3) |
+| POST | `/internal/run` | 같음 | 실행 응답(§3) |
+
+- 인증: `Authorization: Bearer <공유 토큰>`. 앱 서버 `PAIR_RUN_REMOTE_TOKEN` 과 샌드박스 서버 `PAIR_RUN_REMOTE_TOKEN` 이 같아야 하고, 틀리거나 없으면 401. 샌드박스 서버는 토큰이 비면 시작하지 않는다(인증 없는 코드 실행 서버 방지).
+- 오류: 대기열 초과 503 `{"message"}`, `sources` 없음 400. 앱 쪽은 503·연결 실패·응답 지연을 응시자에게 같은 503 안내로 보이고, 401 같은 설정 오류는 서버 오류(500)로 남긴다.
+- 앱 서버 설정: `PAIR_RUN_MODE=remote`, `PAIR_RUN_REMOTE_URL=http://<샌드박스 서버>:8282`, `PAIR_RUN_REMOTE_TOKEN`. 요청 제한 시간은 대기 60초 + 실행 30초 + 여유 30초.
+- 샌드박스 서버 실행: `gradlew bootRunSandbox`(개발) 또는 jar 에서 `java -Dloader.main=com.pair.global.config.SandboxServerConfig -cp pair.jar org.springframework.boot.loader.launch.PropertiesLauncher`. 포트 8282(`PAIR_SANDBOX_PORT`). 이 API 는 사설망(보안 그룹)에서만 열어야 한다.
+
