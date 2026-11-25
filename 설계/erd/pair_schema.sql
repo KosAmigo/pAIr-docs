@@ -935,29 +935,6 @@ COMMENT ON COLUMN proctor_events.review_note IS '판단 메모';
 COMMENT ON COLUMN proctor_events.reviewed_by IS '판단한 회원 ID(같은 회사 PROCTOR·MANAGER 또는 관리자)';
 COMMENT ON COLUMN proctor_events.reviewed_at IS '판단 시각';
 
--- 환경 점검 사진: 시험 전 책상 위(DESK) 점검 사진(과거 방 360도 ROOM 은 호환용). 감독 이벤트와 따로 둔다:
--- 시험 중 경고가 아니라 시험 전 점검 기록이라 이벤트 목록·통계에 섞이지 않는다. 파일은 감독 사진과 같은 저장소·보관 기간.
-CREATE TABLE env_scan_photos (
-    env_scan_photo_id  BIGSERIAL    PRIMARY KEY,
-    participant_id     BIGINT       NOT NULL REFERENCES exam_participants (participant_id) ON DELETE CASCADE,
-    stage              VARCHAR(10)  NOT NULL CHECK (stage IN ('ROOM', 'DESK')),
-    angle_deg          SMALLINT     CHECK (angle_deg BETWEEN 0 AND 359),
-    objects            VARCHAR(400),
-    phone_suspect      BOOLEAN      NOT NULL DEFAULT FALSE,
-    storage_key        VARCHAR(255),
-    size_bytes         INT          NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
-    captured_at        TIMESTAMPTZ  NOT NULL,
-    deleted_at         TIMESTAMPTZ
-);
-CREATE INDEX idx_env_scan_photos_participant ON env_scan_photos (participant_id, env_scan_photo_id);
-COMMENT ON TABLE  env_scan_photos IS '환경 점검 사진(책상 위, 과거 방 360도)';
-COMMENT ON COLUMN env_scan_photos.stage IS '단계(ROOM 방 360도, DESK 책상 위)';
-COMMENT ON COLUMN env_scan_photos.angle_deg IS '방 스캔에서 이 사진을 찍은 방향(0~359도, 책상은 비움)';
-COMMENT ON COLUMN env_scan_photos.objects IS '사진에서 감지한 물체 이름(쉼표로 구분)';
-COMMENT ON COLUMN env_scan_photos.phone_suspect IS '휴대폰으로 감지된 장면인지(감독관이 먼저 확인할 수 있게 표시)';
-COMMENT ON COLUMN env_scan_photos.storage_key IS '파일 저장소 키(보관 기간 뒤에도 남겨 두고 deleted_at 으로 지웠음을 표시)';
-COMMENT ON COLUMN env_scan_photos.deleted_at IS '보관 기간이 지나 파일을 지운 시각';
-
 -- 환경 점검 진행 상태: 입장 대기 중 점검 화면이 3초마다 올리는 최신 상태(콘솔 실시간 확인용, 대상자당 1건 덮어쓰기).
 -- 동의와 함께 저장하는 최종 결과는 proctor_consents.env_check 에 따로 있다.
 CREATE TABLE env_check_progress (

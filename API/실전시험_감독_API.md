@@ -90,26 +90,8 @@
 ### 1-6b. `POST /api/entry/{invite}/submit` 남은 과제 모두 제출 (시험 끝내기)
 - 아직 풀고 있는 응시를 모두 제출하고 `submit_kind=MANUAL`. 규칙은 1-6 과 같다
 
-### 1-8. `POST /api/entry/{invite}/env-scan` 환경 점검 사진 1장
-> **사용 안 함 (2026-11-24):** 책상 위 스캔은 휴대폰 보조 캠이 있어야 동작한다. 휴대폰 캠을 쓰지 않으므로 올라오지 않는다.
-
-**응시자 PC** 가 올립니다. 휴대폰은 영상만 보내고, 책상 위 분석(물체 감지)은 PC 가 받은 휴대폰 영상으로 합니다. 휴대폰을 책상 전체가 한 화면에 보이는 위치에 고정한 상태에서 1.5초 간격 키프레임 사진을 올립니다(`stage: DESK`). 방 360도 스캔은 하지 않습니다(`ROOM`은 예전 데이터 호환용으로만 받습니다). 시험 시작 전 입장 단계에서 올립니다. 사전 테스트(`/practice`)에서는 올리지 않습니다.
-```json
-{ "stage": "DESK", "objects": ["cell phone", "book"], "image": "data:image/jpeg;base64,/9j/4AAQ..." }
-```
-| 필드 | 규칙 |
-|---|---|
-| `stage` | `DESK`(책상 위). `ROOM`(방 360도)은 더 이상 보내지 않지만 예전 기록 때문에 받는다 |
-| `angle` | `ROOM` 사진의 방향 0~359. `DESK`는 비움 |
-| `objects` | 사진에서 감지한 물체 이름, 최대 12개 |
-| `image` | JPEG 만, 감독 사진과 같은 크기 한도 |
-- 응답 `201`: `{id, participantId, stage, angle, objects[], phoneSuspect, sizeBytes, capturedAt, deleted}`. `objects` 에 `cell phone` 이 있으면 `phoneSuspect=true`.
-- 감독을 쓰지 않는 회차, 취소된 회차, 종료 5분 뒤, 대상자당 100장 초과는 거절(400). 잘못된 링크는 404.
-- 감독 이벤트(`proctor_events`)와 **따로** `env_scan_photos` 테이블에 저장해 이벤트 목록·통계에 섞이지 않습니다. 파일은 감독 사진과 같은 저장소(`env-scan/{회차}/{사진}.jpg`)에 올리고, 회차 종료 7일 뒤 파일만 지웁니다.
-- 콘솔: `GET /api/console/sessions/{id}/participants/{pid}/env-scan`(목록), `GET /api/console/sessions/{id}/env-scan/{photoId}/image`(사진). 감독관도 볼 수 있습니다.
-- **책상 위(`DESK`) 감지는 응시를 막지 않고 경고만 합니다.** 휴대폰·책·화면(노트북·모니터)이 잡히면 응시자 화면의 점검 결과에 "책상 위에서 휴대폰 2회가 감지되었습니다. 시험에 필요 없는 물건은 치워 주세요…" 경고(`warn`)가 뜨고, 응시자는 확인 창 없이 다음 단계로 넘어갑니다. 감독관은 콘솔의 "환경 점검 사진"("확인 필요" 표시)에서 사진과 물체 목록을 보고 판단합니다. 책상에서는 응시자 본인의 손·팔이 사람으로 잡혀 오탐이 나므로 `person` 은 세지 않습니다.
-- 응시자가 점검을 다시 하면(통과하지 못한 항목만 다시 점검) 책상 스캔도 다시 하며 사진이 새로 올라갑니다. 이전 사진은 지우지 않고 감독관이 모두 볼 수 있습니다.
-- 휴대폰 보조 캠 스위치(`PHONE_CAM_ENABLED`)는 **꺼진 상태가 정책**이다(2026-11-24, 코드 기본값 정리 예정). 이 절의 책상 스캔은 스위치를 켰을 때만 의미가 있다.
+### 1-8. `POST /api/entry/{invite}/env-scan` 환경 점검 사진 1장 — 제거됨 (V27, 2026-11-25)
+> **제거됨:** 책상 위 스캔은 휴대폰 보조 캠이 있어야 동작했고, 휴대폰 보조 캠을 쓰지 않기로 해 이 API(`POST /api/entry/{invite}/env-scan`), 콘솔 조회(`GET .../participants/{pid}/env-scan`, `GET .../env-scan/{photoId}/image`), 테이블 `env_scan_photos`(Flyway `V27__drop_env_scan_photos.sql`)를 모두 없앴다. 응시자 점검 결과의 책상 위(`DESK`) 감지 경고 문구와 감독관 콘솔의 "환경 점검 사진"도 함께 없어졌다. 점검 결과 자체(`proctor_consents.env_check`)는 그대로다. **운영 DB에 기존 사진 행과 파일(저장소 `env-scan/` 아래)이 있었는지는 확인하지 못했다 — 기존 데이터 정리 확인 필요.**
 
 ### 1-10. `POST /api/entry/{invite}/env-progress` 환경 점검 진행 상태
 ```json
@@ -282,8 +264,6 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | PUT | `/api/console/sessions/{id}/events/{eid}/review` | 담당자 판정 `{review: "OK"\|"SUSPECT"\|null, note}`. `null` 이면 판정을 지움. 판정자(`reviewedBy`)는 로그인한 사람. **카메라 이벤트(`PC_CAM`·`PHONE_CAM`)만 판정한다(2026-11-24).** 브라우저(`BROWSER`)·화면 공유(`SCREEN`) 이벤트는 400("판정하지 않고 기록만 봅니다"). 이들은 응시자에게 경고만 보이고 콘솔에는 이력(시각)만 남는다 |
 | GET | `/api/console/sessions/{id}/events/{eid}/snapshot` | 사진 (image/jpeg, no-store) |
 | GET | `/api/console/sessions/{id}/results` | 순위·분포·역량별 평균·상하위 비교·감독 합계·지표 |
-| GET | `/api/console/sessions/{id}/participants/{pid}/env-scan` | 대상자의 환경 점검 사진 목록 (§1-8, 감독관도 볼 수 있다) |
-| GET | `/api/console/sessions/{id}/env-scan/{photoId}/image` | 환경 점검 사진 (image/jpeg) |
 | GET | `/api/console/sessions/{id}/env-check-failures` | **점검 미통과 입장자** 목록(2026-11-24). 입장했고(`enteredAt`) 동의와 함께 저장된 점검 결과(`pc.items`·`phone.items`)에 `status=fail` 항목이 있는 응시자만: `[{participantId, name, email, enteredAt, checkedAt, failed:[{id,label,detail}], noticeSent}]`. `noticeSent` 는 안내 메시지를 한 번이라도 보냈는지. 입장하지 않았거나 실패가 없거나 점검 JSON 모양이 달라 읽을 수 없으면 제외한다(오류 없이 빈 목록). 감독관도 볼 수 있다 |
 | GET | `/api/console/sessions/{id}/participants/{pid}/env-check` | 환경 점검 결과 `{source: LIVE\|SAVED, updatedAt, result}`. 진행 상태(`env_check_progress`)와 저장된 결과 중 **더 최근 것**, 둘 다 없으면 204. 감독관도 볼 수 있다 |
 | POST | `/api/console/sessions/{id}/participants/{pid}/notices` | 응시자에게 안내 메시지 `{message}`(최대 500자, 일방향). 시험 전·중에만, **취소·종료된 회차는 400**. 감독관도 보낼 수 있다 |
@@ -315,7 +295,7 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 | 종료 시 마무리 | 직접 제출해 후속 질문 단계에 있던 응시도 포함해, 시작한 응시자의 응시를 끝까지 넘긴다: 풀이 중이면 제출하고, 후속 질문 단계면 **빈 답으로 마무리해 채점 큐에 올린다**(안 하면 채점이 시작되지 않음). 이미 채점 단계인 응시는 건드리지 않는다 |
 | 마무리 실패 재시도 | 채점으로 못 넘긴 응시가 있으면 회차를 닫지 않고 2초, 4초, 8초, 16초(최대 30초) 간격으로 다시 시도한다. 5번 실패하면 포기하고 닫으며 오류 로그를 남긴다. 재시도 상태는 서버 메모리에만 있다. 포기한 응시는 콘솔의 `rescue` 로 다시 넘긴다 |
 | 지연 지표 | `closed_at - ends_at` 을 결과 API `metrics.autoSubmitLagMs` 로 |
-| 사진 삭제 | 1시간 주기로 **회차 종료 7일**이 지난 감독 사진과 환경 점검 사진(`env_scan_photos`)을 삭제 (`pair.exam.snapshot-retention-days`). **2026-11-23: 코드 기본값(`ExamProperties`)·`application.yml` 모두 30 → 7 로 바꿨다.** S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at`·`deleted_at` 은 남길 것). 삭제 기준은 연장 횟수를 반영한 값이고 증거 구간 사진도 함께 지운다 (§7-3) |
+| 사진 삭제 | 1시간 주기로 **회차 종료 7일**이 지난 감독 사진을 삭제 (환경 점검 사진은 V27 에서 없앴다) (`pair.exam.snapshot-retention-days`). **2026-11-23: 코드 기본값(`ExamProperties`)·`application.yml` 모두 30 → 7 로 바꿨다.** S3 수명 주기 규칙으로 대신해도 된다 (그때도 `snapshot_deleted_at`·`deleted_at` 은 남길 것). 삭제 기준은 연장 횟수를 반영한 값이고 증거 구간 사진도 함께 지운다 (§7-3) |
 | 연결 유예 | 시작한 응시자의 시험 화면이 10초마다 `heartbeat`(§1-9)를 보낸다. 90초 넘게 끊겼다 돌아오면 `CONNECTION_LOST`, 마지막 신호 뒤 5분 안에 못 돌아오면 링크 만료와 `LINK_EXPIRED`. 30초 주기 점검이 돌아오지 않는 응시자도 만료시킨다 (이미 다 제출한 응시자는 제외) |
 | 초대 메일 | 대상자 등록·다시 보내기 트랜잭션 **커밋 뒤** 비동기 발송. 토큰 원문은 메모리 이벤트로만 메일러에 넘긴다. 결과는 `invite_status` (PENDING/SENT/FAILED). 결과 기록은 두 컬럼만 바꾸는 UPDATE 로 한다 (그 사이 응시자가 시작한 기록을 덮어쓰지 않게) |
 | 하루 전 알림 | 5분 주기로 시작 24시간 안에 든 회차의 대상자에게 1번 (`reminded_at`). 초대 메일을 받은(SENT) 사람만, 시작 24시간 안에 초대된 사람은 건너뜀. 토큰 원문이 없으므로 링크 대신 "초대 메일의 링크" 안내 |
@@ -325,8 +305,8 @@ MANAGER: 자기 회사 회차 관리·대상자·결과·감독. PROCTOR: 자기
 
 ## 5. 테이블
 
-pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ERD 기준 전체), `V2__erd_changes.sql`(초대 상태·`closed_at`·사진 크기·`received_at`), `V11__connection_grace.sql`(연결 유예), `V14__env_scan_photos.sql`(환경 점검 사진) 참고:
-`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`(+`last_seen_at`, `link_expired_at`), `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`(코드표, `CONNECTION_LOST`·`LINK_EXPIRED` 포함), `env_scan_photos`, `env_check_progress`(`V19__env_check_notices.sql`), `proctor_notices`
+pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ERD 기준 전체), `V2__erd_changes.sql`(초대 상태·`closed_at`·사진 크기·`received_at`), `V11__connection_grace.sql`(연결 유예), `V14__env_scan_photos.sql`(환경 점검 사진, 이후 `V27__drop_env_scan_photos.sql` 로 제거) 참고:
+`exam_sessions`, `exam_session_tasks`(+`task_usage`), `exam_participants`(+`last_seen_at`, `link_expired_at`), `proctor_consents`, `proctor_events`(+판정), `proctor_event_types`(코드표, `CONNECTION_LOST`·`LINK_EXPIRED` 포함), `env_check_progress`(`V19__env_check_notices.sql`), `proctor_notices`
 
 > 2026-11-23 추가(§7-4): `proctor_event_frames`(V24, 증거 구간 사진)·`snapshot_retention_extensions`(V23, 보관 연장 이력). 이 절의 표에는 아직 넣지 않았다.
 >
@@ -536,7 +516,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 - **구간 규칙 결정(2026-11-23, 구현됨 — `EvidenceClipService`, 2026-11-24 확인)**: ① **합계 24장 = 채널별 최대 12장**(PC 웹캠 12 + 휴대폰 12. 지금은 웹캠 12장만 쓴다) ② 채널당 **1초 간격**(앞 8초 + 뒤 4초 = 12장이라 정확히 맞는다; 한쪽 채널만 있으면 그 채널만 12장) ③ 요청 본문 **최대 2MB**, 사진 한 장 **최대 100KB**(휴대폰 중계 한도와 같음) ④ 대상자당 증거가 붙은 이벤트 100건(이미 구현)은 §1-7 의 감독 사진 300장 규칙과 **따로 센다**(대표 사진 1장 + 증거 구간은 별개 한도). 최악의 경우 대상자 1명 약 100건 × 24장 × 20KB ≈ 48MB. 서버는 합계 24장, 채널별 12장, 같은 채널 1초 간격, 요청 본문(base64 문자 수 합) 2MB, 사진 한 장 100KB 를 검사한다.
 
 ### 7-3. 보관 기간 · 연장
-- **기본**: 감독 사진·증거 구간 사진은 **회차 종료 7일 뒤 삭제**한다(`pair.exam.snapshot-retention-days` 코드 기본값·`application.yml` 모두 **7**로 바꿈). 환경 점검 사진은 연장 대상이 아니라 7일 뒤 삭제 그대로다. 연장 단위는 **회차 단위**다: 연장하면 그 회차의 감독 사진과 증거 구간 사진의 삭제 시각이 함께 늦춰진다.
+- **기본**: 감독 사진·증거 구간 사진은 **회차 종료 7일 뒤 삭제**한다(`pair.exam.snapshot-retention-days` 코드 기본값·`application.yml` 모두 **7**로 바꿈). 연장 단위는 **회차 단위**다: 연장하면 그 회차의 감독 사진과 증거 구간 사진의 삭제 시각이 함께 늦춰진다.
 - **삭제 예정 시각** = 회차 종료 + 7일 + 연장 횟수 × 7일. `exam_sessions` 에 컬럼을 두지 않고 연장 이력 테이블에서 계산한다(초안은 `evidence_delete_after` 컬럼). 삭제 배치(`purgeExpiredSnapshots`, 1시간 주기)가 연장을 반영하고 감독 사진과 증거 구간 사진을 함께 지운다.
 - **연장 가능 시점**: 삭제 예정 **2일 전부터**(그 전은 400 "삭제 예정 2일 전부터…"). 감독관·매니저·관리자가 **7일씩, 최대 2번**(총 21일). 삭제 예정이 지났거나 3번째면 400. 이미 삭제된 사진은 되살릴 수 없다. 누가·언제·얼마나 연장했는지 이력을 남긴다.
 
