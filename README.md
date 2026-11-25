@@ -12,7 +12,7 @@ pAIr(AI 활용 역량 진단 플랫폼) 기획·설계·평가·API 문서. 코�
 | | 담당_기술명세_상혁.md | 팀원 4(실전 시험 흐름) 담당 기술 명세 (쉬운 정리본의 모델·용어 풀이는 부록으로 합침) |
 | | 담당_기술명세_문희.md | 팀원 3(응시 흐름) 담당 기술 명세 |
 | | 기술검증_보고서_정현.md | 샌드박스·RAG·과제 생성 등 기술검증 결과 (코드는 pAIr-back `poc/`) |
-| `설계/` | ERD(영문).png, ERD(한글).png | 데이터 모델 그림 (테이블 39개, auth_sessions·proctor_event_types·env_check_progress·proctor_notices 등은 그림에 아직 없음 → 정의서 기준 43개(`env_scan_photos` 는 V27 로 제거)) |
+| `설계/` | ERD(영문).png, ERD(한글).png | 데이터 모델 그림 (테이블 39개, proctor_event_types·env_check_progress·proctor_notices 등은 그림에 아직 없음 → 정의서 기준 46개(`env_scan_photos` 는 V27, `auth_sessions` 는 V28 로 제거, V23·V24 추가 표 제외)) |
 | | erd/pair_schema.sql, erd/테이블_정의서.md | ERD 원본 DDL(PostgreSQL)과 테이블 설명 |
 | | erd/sample/ | 샘플 데이터 생성·적재·검증 스크립트와 CSV |
 | | 샌드박스_서버_운영.md | 샌드박스 서버(코드 실행 전용) 구성, 환경변수, 실행, 보안, 시험 날 순서 체크리스트 (EC2 확인 전 초안) |
