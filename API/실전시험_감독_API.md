@@ -577,7 +577,7 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 | `SMARTWATCH` | PHONE_CAM | 스마트워치 감지 | MEDIUM |
 | `SUPERVISION_PAUSED` | **SERVER**(새 source) | AI 감독이 중단된 구간(추론 서버 장애 등). 백엔드가 만들고 `durationMs` 로 구간 길이를 갱신. `detail.reason`: `VISION_DOWN`·`NO_STATE`·`NO_CAPACITY` | LOW |
 
-- 카메라 규칙(`NO_FACE` 등 기존 PC_CAM 유형)도 서버 추론 회차에서는 추론 서버가 만든다. 웹캠 이벤트는 `NO_FACE` `MULTI_FACE` `HEAD_TURN` `HEAD_DOWN` `TORSO_SHIFT` `TORSO_TURN` 6종이고 **`GAZE_AWAY` 는 서버 추론이 만들지 않는다**(2026-11-26 결정, 유형은 코드표에 남음). 손 3개 이상(`MANY_HANDS`)은 유형이 없어 그림자 모드(기록만). 기존 `HAND_MISSING`·`PHONE`·`EXTRA_SCREEN`·`BOOK` 은 서버 추론에서 만들어지지 않는다(예전 기록은 계속 보임).
+- 카메라 규칙(`NO_FACE` 등 기존 PC_CAM 유형)도 서버 추론 회차에서는 추론 서버가 만든다. 웹캠 이벤트는 `NO_FACE` `MULTI_FACE` `HEAD_TURN` `HEAD_DOWN` `TORSO_SHIFT` `TORSO_TURN` 6종이고 **`GAZE_AWAY` 는 서버 추론이 만들지 않는다**(2026-11-26 결정, 유형은 코드표에 남음). 손 3개 이상(`MANY_HANDS`)은 이벤트 유형으로 추가하지 않기로 확정(지표·로그만). 기존 `HAND_MISSING`·`PHONE`·`EXTRA_SCREEN`·`BOOK` 은 서버 추론에서 만들어지지 않는다(예전 기록은 계속 보임).
 - `SUPERVISION_PAUSED` 는 판정 대상이 아니다: `PUT …/review` → 400 "판정하지 않고 기록만 봅니다"(§3). `snapshotMissing` 은 `null`.
 - 모르는 유형을 콘솔이 오류 없이 표시해야 한다(롤백 안전): 새 유형을 쓰기 **전에** 프론트·백엔드 방어 코드를 먼저 배포.
 
