@@ -3,6 +3,7 @@
 > 작성: 팀원 4 (실전 시험 흐름) · 2026-11-19 · **2026-11-24 최종 정책 반영** (웹캠만 사용, 실시간 영상·휴대폰 보조 캠·PC 화면 공유 전부 사용 안 함, 점검 실패여도 입장, 환경 점검 확인·안내 메시지)
 
 > **최종 정책 (2026-11-24):** 감독관 실시간 영상(웹캠·화면·휴대폰 3채널)은 쓰지 않는다. 휴대폰 보조 캠과 PC 화면 공유도 쓰지 않으며, 연결 필수는 웹캠만이다. 카메라 부정행위 이벤트는 **웹캠의 앞뒤 사진**(§7-2)으로 감독관이 확인하고, 브라우저 이벤트(탭·창·마우스 이탈, 전체 화면 해제, 붙여넣기)는 감독관 콘솔에 **이력만** 남긴다(확정/기각 없음). 아래 §2(휴대폰 릴레이), §6-11(감독관 영상 시그널링), §7-1(휴대폰 프레임 중계), 화면 공유 이벤트(§1-7, §6-6)와 `PHONE_CAM` 이벤트 유형은 **사용 안 함**이며, 계약과 코드는 남겨 두고 스위치 `PHONE_CAM_ENABLED`·`SCREEN_SHARE_ENABLED`·`LIVE_VIEW_ENABLED`(백엔드 `PAIR_LIVE_VIEW_ENABLED`)로 끈다(꺼진 상태가 정책). 의도: [실전시험-감독.md](../docs/intent/실전시험-감독.md).
+> **서버 추론 모드(2026-11-25 설계, 미구현, §8):** 웹캠·휴대폰 사진을 RunPod GPU 서버가 분석하는 모드다. 회차별 스위치(`exam_sessions.server_vision`)가 켜진 회차에서만 적용되며 **꺼진 회차는 이 문서 §0~§7 그대로**(PC 분석, 보관 7일)다. 이 문서 앞쪽의 "영상은 서버로 보내지 않는다"·"사진 7일"은 서버 추론이 꺼진 회차의 규칙이다. 새 계약은 §8.
 > **2026-11-23 구현됨(§7):** 이벤트 앞 8초·뒤 4초 **증거 구간 사진**을 저장해 완료된 회차에서도 확정/기각하며, 보관은 **연장(최대 2번)** 할 수 있다. 백엔드는 `develop`, 프론트는 `main` 에 들어갔고 **실제 카메라 확인은 아직**이다. 휴대폰 프레임 중계(§7-1)는 만들어 두었으나 2026-11-24 에 사용 안 함으로 정했다. 근거: [../docs/intent/실전시험-감독.md](../docs/intent/실전시험-감독.md). 
 > 프론트는 이 명세대로만 부른다. 호출 코드는 pAIr-front `frontend/src/proctor/api/proctorApi.ts` 한 파일에 모여 있어서, 주소가 바뀌면 그 파일만 고치면 된다.
 > 참고 구현: pAIr-back `backend/src/main/java/com/pair/exam/` (Spring Boot, JPA, PostgreSQL). 그대로 옮겨 써도 된다.
@@ -540,3 +541,78 @@ pAIr-back `backend/src/main/resources/db/migration/` 의 `V1__erd_schema.sql`(ER
 3. **서버 상한 값 정하는 방법(결정)**: 임시값은 그대로 두고, 가짜 휴대폰 N대(프레임 15KB, 2fps)를 서버 1대에 붙이는 부하 시험으로 "서버 CPU 70% 이하, 중계 지연 p95 1초 이하, 프레임 폐기율 5% 이하"를 지키는 최대 N 을 찾은 뒤 그 **70%** 를 상한으로 한다. 시험 전에는 임시값 유지, 시험 결과는 이 절에 기록한다.
 4. 앞 8초·뒤 4초 구간이 실제 시험에서 시간 기준으로 맞게 올라가고 재전송해도 중복되지 않는가(서버는 멱등으로 만들었다).
 5. 운영 환경(S3, 서버 여러 대)에서 삭제 배치가 연장된 값을 따르는가. 짝이 서버 메모리라 서버가 여러 대면 같은 서버로 가야 한다.
+
+
+---
+
+## 8. 서버 추론 모드 (2026-11-25 설계 확정, **미구현**) — 스위치가 켜진 회차에서만
+
+> **상태:** 설계·계약만 있고 코드는 아직 없다. 의도: [서버-추론-감독.md](../docs/intent/서버-추론-감독.md), 전체 설계·계약 원문: [서버_추론_감독_설계.md](../설계/서버_추론_감독_설계.md) §3(프로토콜)·§6(저장). 이 절은 **프론트 ↔ 백엔드·콘솔이 쓰는 부분의 요약**이다. 필드·상태 코드가 다르면 설계 문서 §3·§6 이 기준이다.
+> **적용 조건(셋 다 참):** 백엔드 `PAIR_SERVER_VISION_ENABLED=true` · 회차 `exam_sessions.server_vision=true`(ADMIN 만, 시작 전만 변경) · 회차 `proctoring=true`. 하나라도 거짓이면 §1~§7 의 지금 동작(PC 브라우저 분석, 7일 보관)이 **그대로**이고 이 절의 경로는 닫혀 있다. 기존 필드는 **추가만** 했고 제거·이름 변경은 없다.
+> §0 의 개인정보 원칙("영상은 서버로 보내지 않는다", "사진 7일")은 **서버 추론이 꺼진 회차**의 규칙이다. 서버 추론 회차는 아래와 동의 문구 v3 가 적용된다.
+
+### 8-1. 응시 화면 → 백엔드 (WebSocket `/ws/vision`)
+- hello(`role: webcam|phone`) → `ready`(`mode: check|exam`, `rate`) 이후 JPEG(binary, 4바이트 `seq` + JPEG, 최대 100KB)를 보낸다. 휴대폰은 `paired` 로 받은 짝 코드로 연결. 서버는 `rate`(`fps`·`maxEdge`·`quality`)로 보낼 간격·크기를 지시한다(임시값: 웹캠 1fps·400px·0.55, 휴대폰 1fps·512px).
+- 서버 → PC: `status`(`vision: up|down`, `phone: connected|disconnected|stale`), `peer`, `mode`, `check`(입장 점검 판정: `keyboard`·`mouse`·`leftHand`·`rightHand`·`desk` 불리언 + `hints` 코드 + `holdMs` + `passed`. **사진·영상 없음**).
+- 닫기 코드: 4400 형식 · 4401 인증 · **4403** `VISION_DISABLED`(스위치 꺼짐)/`CONSENT_REQUIRED`(동의 v3 아님) · 4409 `REPLACED` · 4429 `RATE_LIMITED` · 4500 `INTERNAL`. 오류 형식은 설계 §3-1.
+- 기존 `/ws/proctor`(§2·§7-1)는 그대로 남고 스위치 꺼진 회차가 쓴다.
+
+### 8-2. 기존 응시자 API 의 추가 필드
+| API | 변화 |
+|---|---|
+| `GET /api/entry/{invite}` (§1-2) | 응답에 `serverVision: boolean` · `consentVersionRequired: "v2"\|"v3"` 추가. 프론트는 이것으로 모드를 정한다 |
+| `POST …/consent` (§1-3) | 서버 추론 회차는 `consentVersion` 이 `v3` 가 아니면 400 `CONSENT_VERSION_MISMATCH` |
+| `POST …/proctor-events` (§1-7) | 서버 추론 회차는 **카메라 유형을 받지 않는다**(400 `SERVER_VISION_ONLY`; 추론 서버가 만든다). 브라우저 유형은 그대로 |
+| `POST …/proctor-events/{clientId}/clip` (§7-2) | 서버 추론 회차는 400 `SERVER_VISION_ONLY`(백엔드가 상시 저장분에서 승격) |
+| `POST …/env-progress`·`consent` (§1-3·§1-10) | 입장 점검 JSON 에 `phone_keyboard` `phone_mouse` `phone_hand_left` `phone_hand_right` `phone_desk` 항목(`pass`/`fail`)을 넣는다. API 모양은 그대로 |
+
+### 8-3. 새 이벤트 유형 (`proctor_event_types`, 설계 §7·§8·§10)
+| type | source | 뜻 | 심각도(**제안**, D-7) |
+|---|---|---|---|
+| `HANDS_OUT` | PHONE_CAM | 두 손이 키보드·마우스 영역 밖에 7초 이상(끊김 3초 허용) | MEDIUM |
+| `HAND_OUT_ONE` | PHONE_CAM | 한 손만 영역 밖에 10초 이상(다른 손은 영역 위) | LOW |
+| `PHONE_MOVED` | PHONE_CAM | 휴대폰 거치대 위치가 기준에서 벗어남 | LOW |
+| `TABLET` | PHONE_CAM | 태블릿 감지 | HIGH |
+| `NOTE` | PHONE_CAM | 메모지·책 등 필기물 감지 | MEDIUM |
+| `SMARTWATCH` | PHONE_CAM | 스마트워치 감지 | MEDIUM |
+| `SUPERVISION_PAUSED` | **SERVER**(새 source) | AI 감독이 중단된 구간(추론 서버 장애 등). 백엔드가 만들고 `durationMs` 로 구간 길이를 갱신. `detail.reason`: `VISION_DOWN`·`NO_STATE`·`NO_CAPACITY` | LOW |
+
+- 카메라 규칙(`NO_FACE` 등 기존 PC_CAM 유형)도 서버 추론 회차에서는 추론 서버가 만든다. 웹캠 이벤트는 `NO_FACE` `MULTI_FACE` `HEAD_TURN` `HEAD_DOWN` `TORSO_SHIFT` `TORSO_TURN` 6종이고 **`GAZE_AWAY` 는 서버 추론이 만들지 않는다**(2026-11-26 결정, 유형은 코드표에 남음). 손 3개 이상(`MANY_HANDS`)은 유형이 없어 그림자 모드(기록만). 기존 `HAND_MISSING`·`PHONE`·`EXTRA_SCREEN`·`BOOK` 은 서버 추론에서 만들어지지 않는다(예전 기록은 계속 보임).
+- `SUPERVISION_PAUSED` 는 판정 대상이 아니다: `PUT …/review` → 400 "판정하지 않고 기록만 봅니다"(§3). `snapshotMissing` 은 `null`.
+- 모르는 유형을 콘솔이 오류 없이 표시해야 한다(롤백 안전): 새 유형을 쓰기 **전에** 프론트·백엔드 방어 코드를 먼저 배포.
+
+### 8-4. 추론 서버 → 백엔드 이벤트 콜백 (내부 API, 응시자·콘솔 인증 없음)
+`POST /internal/vision/events` · 헤더 `X-Vision-Key-Id`·`X-Vision-Timestamp`(epoch 초, ±60초)·`X-Vision-Signature`(= hex HMAC-SHA256(비밀, `timestamp + "." + 본문`)). 본문 필드 `clientId`(결정적, 33자)·`sessionKey`·`type`·`source`·`startedAtMs`·`durationMs`·`confidence`·`detail`·`final`·`rulesVersion`. **사진은 붙이지 않는다.**
+
+| 응답 | 뜻 · 재시도 |
+|---|---|
+| 201 `{id, duplicate:false}` / 200 `{id, duplicate:true, updated}` | 저장 / 같은 `clientId` 중복(새 `durationMs` 가 더 크면 갱신) |
+| 400 `INVALID_EVENT` · 404 `UNKNOWN_SESSION_KEY` · 409 `SESSION_NOT_ACTIVE` · 413 · 422 `LIMIT_REACHED` | **재시도 안 함** |
+| 401 `MISSING_SIGNATURE` · 403 `BAD_SIGNATURE`/`STALE_TIMESTAMP`/`UNKNOWN_KEY_ID` | 서명·시각 문제 |
+| 429·5xx·연결 오류 | 1·2·4·8·16·30초 뒤 재시도(최대 10분), 같은 `clientId` |
+
+필드 규칙·추론 서버 REST(`/v1/sessions/{key}/start|mode|end`, `/healthz`, `/readyz`, `/metrics`, `/v1/admin/drain`)·`/v1/stream` 은 설계 §3-2~§3-5.
+
+### 8-5. 콘솔 API 변화
+| 메서드 | 경로 | 변화 |
+|---|---|---|
+| GET | `/api/console/sessions/{id}/events/{eventId}/clip` (§7-2) | 응답에 `status`(`READY`·`PENDING`·`EXPIRED`·`NONE`)·`availableAt` 추가. `PENDING` 이면 `frames:[]`(뒤 4초·마지막 묶음 저장 전, 조회하면 시각이 되면 그 자리에서 승격). 프레임 `source` 에 `PHONE_CAM` 이 나올 수 있다(D-23 확정: 휴대폰 사진 사후 열람). 사진 본문 `…/clip/{frameId}/image` 는 그대로 |
+| GET·POST | `/api/console/sessions/{id}/retention`(+`/extend`) (§7-3) | 응답에 `baseDays`(서버 추론 3, 아니면 7)·`extendableFromDaysBefore`(서버 추론 1, 아니면 2 — 확정) 추가. `extensionDays`·`maxExtensions` 도 회차에 따라 다르다(서버 추론 3·2, 아니면 7·2 — 확정). **프론트는 상수를 쓰지 말고 응답 값을 쓴다.** 서버 추론 회차의 연장은 3일씩 |
+| PUT | `/api/console/sessions/{id}` (§3) | 요청에 `serverVision`(선택) 추가. ADMIN 만, **시작 전만**(시작 뒤·MANAGER 가 보내면 400) |
+| GET | `/api/console/sessions/{id}/participants/{pid}/stream?eventId=&channel=webcam\|phone&from=&limit=` | **새.** 감독 중단 이벤트 구간 안의 상시 저장 사진 목록 `{eventId, channel, from, to, frames:[{t, n}], next}`. `limit` 기본 120·최대 300. 구간 밖이면 403 `OUT_OF_ALLOWED_RANGE`, 보관 기간 지나면 410 `EXPIRED` |
+| GET | `/api/console/sessions/{id}/participants/{pid}/stream/frame?eventId=&channel=&t=` | **새.** 사진 한 장(image/jpeg, no-store) |
+
+- 두 새 API 는 감독관·매니저·관리자, 자기 회사 회차만(다른 회사 404). 열람마다 `proctor_stream_access_logs` 에 기록한다. 서버 추론이 아닌 회차는 404.
+- 감독관은 상시 저장분 전체를 열람하지 못한다. 열람 범위는 이벤트 구간(`/clip`)과 감독 중단 구간(`/stream`)뿐이다.
+
+### 8-6. 보관 기간 (서버 추론 회차)
+| 대상 | 보관 | 연장 |
+|---|---|---|
+| 상시 저장분(웹캠·휴대폰 초당 1장, `exam-stream/…` 10초 묶음) | 시험 종료 후 **3일** | 없음(**가정**) |
+| 이벤트 구간 사진·이벤트 대표 사진 | 시험 종료 후 **3일** | **3일 단위**, 최대 2번, 삭제 1일 전부터(확정 2026-11-26) |
+| (서버 추론이 꺼진 회차, §7-3) | 7일 | 7일씩 최대 2번, 삭제 2일 전부터 — **변경 없음** |
+
+삭제 배치(§4 "사진 삭제")는 서버 추론 회차의 기본일수·연장일수를 회차 플래그로 정하고 상시 저장 묶음도 함께 지운다.
+
+### 8-7. 테이블
+`exam_sessions.server_vision`, `exam_participants.vision_key`, `proctor_stream_packs`, `proctor_stream_access_logs`, `proctor_event_types` 새 행·`source=SERVER`. 열 설명은 [테이블_정의서.md](../설계/erd/테이블_정의서.md) §6 "서버 추론 감독".
