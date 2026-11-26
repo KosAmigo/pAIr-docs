@@ -16,11 +16,11 @@
 
 ## 기업 도입 문의
 
-### 명단 CSV 양식 다운로드
+### 명단 양식 다운로드
 
-`GET /api/company-inquiries/members-template.csv` — 인증 불필요, `200 text/csv`
+`GET /api/company-inquiries/members-template.xlsx` — 인증 불필요, `200` 엑셀(xlsx). 회차 대상자 양식과 같은 모양이다: 제목·안내 띠, 머리 행(`회원명`·`회원이메일`·`역할`), 예시 행(지우지 않고 올려도 무시), 역할 목록(`MANAGER`/`PROCTOR`)·이메일 형식 검사, "작성 안내" 시트. (2026-11-26)
 
-UTF-8 CSV 파일이며 헤더는 `회원명,회원이메일,역할`이다. 허용 역할은 `MANAGER`, `PROCTOR`다.
+`GET /api/company-inquiries/members-template.csv` — 인증 불필요, `200 text/csv`. UTF-8 CSV 파일이며 헤더는 `회원명,회원이메일,역할`이다. 허용 역할은 `MANAGER`, `PROCTOR`다.
 
 ### 문의 제출
 
@@ -33,7 +33,7 @@ UTF-8 CSV 파일이며 헤더는 `회원명,회원이메일,역할`이다. 허�
 | `contactName` | 예 | 문의 담당자 이름 |
 | `contactEmail` | 예 | 문의 담당자 이메일 |
 | `message` | 아니오 | 문의 내용 |
-| `members` | 예 | `.csv` 파일. 헤더 `회원명,회원이메일,역할`; 매니저는 정확히 1명, 감독관은 0명 이상 |
+| `members` | 예 | `.xlsx`(양식) 또는 `.csv` 파일. 엑셀은 첫 시트에서 `회원명`·`회원이메일`·`역할` 머리 행을 찾아 읽고, CSV 는 헤더 `회원명,회원이메일,역할`; 매니저는 정확히 1명, 감독관은 0명 이상 |
 
 성공 응답 예:
 ```json
@@ -58,7 +58,7 @@ CSV 내부 중복 이메일, 허용되지 않은 역할, 매니저 수 오류, �
 ### 문의 목록 및 명단 교체
 
 - `GET /api/admin/company-inquiries` — `200`, 문의와 각 명단을 반환한다.
-- `POST /api/admin/company-inquiries/{inquiryId}/members` — `multipart/form-data`의 `file` CSV로 대기 중 문의의 명단을 통째로 교체한다. 성공 시 `200`과 갱신된 문의를 반환한다. 처리된 문의는 수정할 수 없다.
+- `POST /api/admin/company-inquiries/{inquiryId}/members` — `multipart/form-data`의 `file`(엑셀 또는 CSV)로 대기 중 문의의 명단을 통째로 교체한다. 성공 시 `200`과 갱신된 문의를 반환한다. 처리된 문의는 수정할 수 없다.
 
 ### 문의 승인·거절
 
