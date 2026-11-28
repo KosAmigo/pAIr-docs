@@ -1,10 +1,10 @@
 # 관리자 통계 API
 
-관리자 콘솔에서 서비스 이용 현황을 보는 API다. 회원, 자가진단·실전 응시와 평균 점수, AI 토큰·예상 비용, 크레딧 결제를 기간별로 모은다.
+관리자 콘솔에서 서비스 이용 현황을 보는 API다. 회원, 자가진단·실전 응시와 평균 점수(과제별 포함), AI 토큰·예상 비용, 크레딧 결제를 기간별로 모은다. 회원 목록 API 는 아래 [회원 목록](#회원-목록) 절.
 관리자(ADMIN)만 부를 수 있고, 다른 역할은 403 이다. 모든 값은 저장된 기록을 집계해서 만든다(별도 집계 테이블 없음).
 
 > 구현: pAIr-back `domain/stats` (`AdminStatsController`, `AdminStatsService`, `AdminStatsResponse`), 2026-11-28
-> 레이팅·합격률·과제별 통계는 아직 없다(레이팅은 나중에 추가 예정).
+> 레이팅·합격률은 아직 없다(레이팅은 나중에 추가 예정). 과제별 평균 점수·회원 목록은 2026-11-28 추가.
 
 ## 호출
 
@@ -29,7 +29,8 @@ GET /api/admin/stats?from=2026-11-01&to=2026-11-15
   "selfDiagnosis": {
     "started": 310, "submitted": 240, "scored": 236, "averageScore": 64.3,
     "bands": [ { "range": "0-39", "count": 30 }, { "range": "40-59", "count": 70 },
-               { "range": "60-79", "count": 90 }, { "range": "80-100", "count": 46 } ]
+               { "range": "60-79", "count": 90 }, { "range": "80-100", "count": 46 } ],
+    "tasks": [ { "taskId": "order-deadlock", "title": "주문 처리 장애 원인 분석", "scored": 150, "averageScore": 61.2 } ]
   },
   "live": {
     "sessions": 4, "participants": 55, "started": 98, "submitted": 95, "scored": 95, "averageScore": 58.2,
@@ -74,6 +75,7 @@ GET /api/admin/stats?from=2026-11-01&to=2026-11-15
 - `scored`: 채점 리포트가 나온 응시 수(리포트 버전 2 이상, 총점 있음).
 - `averageScore`: 채점 총점의 평균, 소수 첫째 자리. 리포트의 `total / max × 100` 으로 100점 만점으로 바꿔 평균한다(지금 루브릭은 만점 100점이라 총점 그대로). 채점된 응시가 없으면 `null`.
 - `bands`: 점수 구간별 응시 수. `0-39`, `40-59`, `60-79`, `80-100` (하한 포함).
+- `selfDiagnosis.tasks`: 자가진단 과제별 채점 수와 평균 점수. 채점이 많은 순. `taskId` 는 과제 코드(화면 주소의 ID), 지운 과제는 제목이 `(지운 과제)`. 응시 수는 사람 수가 아니라 응시 건수다.
 
 ## AI 비용
 
@@ -81,3 +83,41 @@ GET /api/admin/stats?from=2026-11-01&to=2026-11-15
 - 단가가 없는 모델은 그 줄의 `usd` 가 `null` 이고 `unpricedModels` 에 이름이 들어가며 합계에서 빠진다.
 - 과제 생성: 작업마다 기록된 비용(`task_gen_jobs.cost_usd`)의 합. 토큰은 호출 기록(`task_gen_calls`)의 합.
 - `totalUsd` = 자가진단 채팅 + 실전 채팅 + 채점 + 과제 생성.
+
+## 회원 목록
+
+```
+GET /api/admin/members?role=ALL&q=김&page=0&size=20
+```
+
+| 파라미터 | 기본 | 설명 |
+| --- | --- | --- |
+| `role` | `ALL` | `ALL` 전체, `USER` 일반 회원, `COMPANY` 기업 계정(매니저·감독관), `ADMIN` 관리자. 다른 값은 400 |
+| `q` | 빈 값 | 이름 또는 이메일 일부 (대소문자 무시) |
+| `page` | 0 | 0부터 |
+| `size` | 20 | 1~100. 넘으면 400 |
+
+탈퇴한 계정은 보이지 않는다. 최근 가입 순이다.
+
+```json
+{
+  "members": [
+    { "id": 12, "name": "김자가", "email": "kim@example.com", "role": "USER", "status": "ACTIVE", "companyName": null,
+      "joinedAt": "2026-11-20T03:00:00Z", "selfAttempts": 3, "selfSubmitted": 2, "averageScore": 82.4,
+      "creditBalance": 170, "lastAttemptAt": "2026-11-27T05:00:00Z" }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+| 항목 | 설명 |
+| --- | --- |
+| `role` | `USER`, `MANAGER`, `PROCTOR`, `ADMIN` |
+| `status` | `ACTIVE` 이용 중, `PENDING` 기업 계정 첫 로그인 전 |
+| `companyName` | 기업 계정의 회사 이름 |
+| `selfAttempts`, `selfSubmitted` | 자가진단 응시(시작) 수와 그중 제출 수. **전체 기간**, 지운 응시 제외 |
+| `averageScore` | 채점된 자가진단 총점(0~100점) 평균. 통계와 같은 기준. 없으면 `null` |
+| `creditBalance` | 크레딧 잔액. 일반 회원만, 관리자·기업 계정은 `null` |
+| `lastAttemptAt` | 마지막 자가진단 시작 시각. 없으면 `null` |
+
+회원별 값은 한 페이지의 회원 ID 로 한 번씩 모아 읽는다(회원마다 따로 조회하지 않는다).
